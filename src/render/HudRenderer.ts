@@ -17,6 +17,26 @@ export interface CrtInteractiveButton {
   label: string;
 }
 
+export interface HudLayoutMetrics {
+  hudScale: number;
+  centerScale: number;
+  marginX: number;
+  topHeaderY: number;
+  sidePanelW: number;
+  sidePanelH: number;
+  safeLeftPx: number;
+  safeRightPx: number;
+  safeWidthPx: number;
+  safeTopPx: number;
+  safeBottomPx: number;
+  safeHeightPx: number;
+}
+
+export interface AvionicsWarningItem {
+  text: string;
+  critical: boolean;
+}
+
 export interface HudRenderContext {
   phase: GamePhase;
   width: number;
@@ -61,6 +81,91 @@ export const BOOT_LINES = [
 
 export class HudRenderer {
   public buttons: CrtInteractiveButton[] = [];
+
+  public static computeLayoutMetrics(crtWidth: number, crtHeight: number): HudLayoutMetrics {
+    const baseSideW = 308;
+    const baseSideH = 584;
+    const marginX = Math.max(10, Math.round(crtWidth * 0.012));
+    const topHeaderY = 44;
+
+    const scaleW = (crtWidth * 0.215) / baseSideW;
+    const scaleH = (crtHeight - topHeaderY - 18) / baseSideH;
+    const hudScale = Math.max(0.56, Math.min(1.26, Math.min(scaleW, scaleH)));
+
+    const sidePanelW = Math.round(baseSideW * hudScale);
+    const sidePanelH = Math.round(baseSideH * hudScale);
+    const safeLeftPx = marginX + sidePanelW + 14;
+    const safeRightPx = crtWidth - marginX - sidePanelW - 14;
+    const safeWidthPx = Math.max(180, safeRightPx - safeLeftPx);
+
+    const centerScale = Math.max(0.66, Math.min(1.24, Math.min(safeWidthPx / 565, hudScale * 1.05)));
+    const safeTopPx = topHeaderY + Math.round(108 * centerScale);
+    const safeBottomPx = crtHeight - Math.round(74 * centerScale);
+    const safeHeightPx = Math.max(140, safeBottomPx - safeTopPx);
+
+    return {
+      hudScale,
+      centerScale,
+      marginX,
+      topHeaderY,
+      sidePanelW,
+      sidePanelH,
+      safeLeftPx,
+      safeRightPx,
+      safeWidthPx,
+      safeTopPx,
+      safeBottomPx,
+      safeHeightPx,
+    };
+  }
+
+  public static computeAvionicsWarnings(lander: LanderState): AvionicsWarningItem[] {
+    if (!lander.alive || lander.groundedPad !== null) return [];
+    const alerts: AvionicsWarningItem[] = [];
+
+    if (lander.ceilingClearance < 9 && lander.vel.y > 1.2) {
+      alerts.push({ text: 'OBSTACLE', critical: true });
+    }
+    if (lander.agl < 16 && lander.vel.y < -4.4) {
+      alerts.push({ text: 'PULL UP', critical: true });
+    } else if (
+      ((lander.agl < 26 && lander.vel.y < -3.05) || (lander.agl < 14 && lander.vel.y < -2.4)) &&
+      lander.throttle < 0.85
+    ) {
+      alerts.push({ text: 'SINK RATE', critical: true });
+    } else if (lander.agl < 42 && lander.vel.y < -2.55 && lander.throttle < 0.78) {
+      alerts.push({ text: 'DESCENT RATE', critical: false });
+    }
+
+    const absPitchDeg = Math.abs((lander.angle * 180) / Math.PI);
+    if ((lander.agl < 52 && absPitchDeg > 20.0) || absPitchDeg > 38.0) {
+      alerts.push({
+        text: 'BANK ANGLE',
+        critical: lander.agl < 32 && absPitchDeg > 33.0,
+      });
+    }
+
+    if (lander.agl < 28 && Math.abs(lander.vel.x) > 1.65) {
+      alerts.push({
+        text: 'LATERAL DRIFT',
+        critical: lander.agl < 15 && Math.abs(lander.vel.x) > 2.4,
+      });
+    }
+
+    if (lander.inWindShear) {
+      alerts.push({ text: 'WIND SHEAR', critical: false });
+    }
+    if (lander.inThermalUpdraft) {
+      alerts.push({ text: 'THERMAL UPDRAFT', critical: false });
+    }
+
+    const fuelRatio = lander.fuelKg / Math.max(1, lander.maxFuelKg);
+    if (fuelRatio <= 0.16) {
+      alerts.push({ text: 'LOW FUEL', critical: lander.fuelKg <= 12 });
+    }
+
+    return alerts;
+  }
 
   public render(ctx: CanvasRenderingContext2D, state: HudRenderContext): void {
     this.buttons = [];
@@ -193,31 +298,8 @@ export class HudRenderer {
 
     const lander = state.lander;
     const sector = state.sector;
-
-    // ---------------------------------------------------------------------
-    // RIGHT INSTRUMENT CLUSTER (EVEN LARGER): FLIGHT DATA + 86PX DIALS + VERNIER
-    // ---------------------------------------------------------------------
-    const clusterW = Math.min(324, Math.max(268, Math.round(w * 0.275)));
-    const rx = w - clusterW - 16;
-    const ry = 44;
-    const clusterH = Math.min(620, h - 58);
-
-    ctx.fillStyle = 'rgba(3, 8, 5, 0.88)';
-    ctx.fillRect(rx, ry, clusterW, clusterH);
-    this.drawCornerBrackets(ctx, rx, ry, clusterW, clusterH, 16, COLORS.GREEN_DIM, 2.4);
-
-    // 1. Expanded "FLIGHT DATA" Tabular Telemetry Block (7 Avionics Rows)
-    ctx.textAlign = 'left';
-    ctx.font = 'bold 18px "Share Tech Mono", monospace';
-    ctx.fillStyle = COLORS.GREEN_BRIGHT;
-    ctx.fillText('FLIGHT DATA', rx + 14, ry + 24);
-
-    ctx.strokeStyle = COLORS.GREEN_PRIMARY;
-    ctx.lineWidth = 2.2;
-    ctx.beginPath();
-    ctx.moveTo(rx + 14, ry + 31);
-    ctx.lineTo(rx + clusterW - 14, ry + 31);
-    ctx.stroke();
+    const layout = HudRenderer.computeLayoutMetrics(w, h);
+    const s = layout.hudScale;
 
     const totalMass = lander.dryMassKg + lander.fuelKg;
     const currentTwr = PHYSICS.MAIN_THRUST_N / (totalMass * sector.gravity);
@@ -239,6 +321,41 @@ export class HudRenderer {
           ? `${Math.min(99.9, lander.agl / Math.abs(lander.vel.y)).toFixed(1)} SEC`
           : 'CLIMB/HVR';
 
+    // ---------------------------------------------------------------------
+    // RIGHT INSTRUMENT CLUSTER (WINDOW-SCALED): FLIGHT DATA + DIALS + VERNIER
+    // ---------------------------------------------------------------------
+    const baseW = 308;
+    const baseH = 584;
+    const rightScreenX = w - layout.marginX - layout.sidePanelW;
+    const rightScreenY = layout.topHeaderY;
+
+    ctx.save();
+    ctx.translate(rightScreenX, rightScreenY);
+    ctx.scale(s, s);
+
+    ctx.fillStyle = 'rgba(3, 8, 5, 0.88)';
+    ctx.fillRect(0, 0, baseW, baseH);
+    this.drawCornerBrackets(ctx, 0, 0, baseW, baseH, 16, COLORS.GREEN_DIM, 2.4);
+
+    // 1. Expanded "FLIGHT DATA" Tabular Telemetry Block (7 Avionics Rows)
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 18px "Share Tech Mono", monospace';
+    ctx.fillStyle = COLORS.GREEN_BRIGHT;
+    ctx.fillText('FLIGHT DATA', 14, 24);
+
+    ctx.strokeStyle = COLORS.GREEN_PRIMARY;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(14, 31);
+    ctx.lineTo(baseW - 14, 31);
+    ctx.stroke();
+
+    const vsDangerous =
+      lander.vel.y < -10.5 || (lander.agl < 40 && lander.vel.y < -PHYSICS.SURVIVAL_VS_MAX);
+    const hsDangerous =
+      Math.abs(lander.vel.x) > 6.8 ||
+      (lander.agl < 34 && Math.abs(lander.vel.x) > PHYSICS.SURVIVAL_HS_MAX);
+
     const dataRows: Array<{ label: string; val: string; color: string }> = [
       {
         label: 'MASS / TWR',
@@ -248,18 +365,18 @@ export class HudRenderer {
       {
         label: 'VERT VEL',
         val: `${lander.vel.y >= 0 ? '+' : ''}${lander.vel.y.toFixed(2)} M/S`,
-        color:
-          lander.vel.y < -PHYSICS.SURVIVAL_VS_MAX
-            ? COLORS.RED_KLAXON
-            : lander.vel.y < -PHYSICS.SAFE_VS_MAX
-              ? COLORS.AMBER_CAUTION
-              : COLORS.GREEN_PRIMARY,
+        color: vsDangerous
+          ? COLORS.RED_KLAXON
+          : lander.vel.y < -PHYSICS.SAFE_VS_MAX && lander.agl < 70
+            ? COLORS.AMBER_CAUTION
+            : COLORS.GREEN_PRIMARY,
       },
       {
         label: 'LAT DRIFT',
         val: `${lander.vel.x >= 0 ? '+' : ''}${lander.vel.x.toFixed(2)} M/S`,
-        color:
-          Math.abs(lander.vel.x) > PHYSICS.SAFE_HS_MAX
+        color: hsDangerous
+          ? COLORS.RED_KLAXON
+          : Math.abs(lander.vel.x) > PHYSICS.SAFE_HS_MAX && lander.agl < 70
             ? COLORS.AMBER_CAUTION
             : COLORS.GREEN_PRIMARY,
       },
@@ -285,68 +402,68 @@ export class HudRenderer {
         label: 'TIME TO IMP',
         val: ttiStr,
         color:
-          lander.vel.y < -2.5 && lander.agl < 28 ? COLORS.RED_KLAXON : COLORS.GREEN_PRIMARY,
+          lander.vel.y < -3.2 && lander.agl < 24 ? COLORS.RED_KLAXON : COLORS.GREEN_PRIMARY,
       },
     ];
 
     ctx.font = 'bold 13.5px "JetBrains Mono", monospace';
     dataRows.forEach((row, idx) => {
-      const ty = ry + 50 + idx * 19;
+      const ty = 50 + idx * 19;
       ctx.textAlign = 'left';
       ctx.fillStyle = COLORS.GREEN_MID;
-      ctx.fillText(row.label, rx + 14, ty);
+      ctx.fillText(row.label, 14, ty);
 
       ctx.textAlign = 'right';
       ctx.fillStyle = row.color;
-      ctx.fillText(row.val, rx + clusterW - 14, ty);
+      ctx.fillText(row.val, baseW - 14, ty);
     });
 
-    // 2. Larger Chunky Circular Golden-Orange Gauges + Stepped Vertical Green Vernier Scale
-    const gaugesTopY = ry + 184;
-    const leftColCx = rx + Math.round(clusterW * 0.28);
-    const rightColCx = rx + Math.round(clusterW * 0.74);
-    const dialR = Math.min(43, Math.max(33, Math.round((clusterH - 216) / 8.6)));
-    const rowStep = dialR * 2 + 36;
+    // 2. Chunky Circular Golden-Orange Gauges + Stepped Vertical Green Vernier Scale
+    const gaugesTopY = 182;
+    const leftColCx = Math.round(baseW * 0.28);
+    const rightColCx = Math.round(baseW * 0.74);
+    const dialR = 40;
+    const rowStep = 116;
 
     // Gauge A: FUEL Circular Wedge Dial
     const fuelRatio = Math.max(0, Math.min(1, lander.fuelKg / Math.max(1, lander.maxFuelKg)));
     this.drawChunkyFuelWedgeDial(
       ctx,
       leftColCx,
-      gaugesTopY + dialR + 6,
+      gaugesTopY + dialR + 4,
       dialR,
       fuelRatio,
       `${lander.fuelKg.toFixed(0)} KG`,
       'FUEL'
     );
 
-    // Gauge B: SPEED Dial
+    // Gauge B: SPEED Dial (Scaled to 15.0 M/S full-scale; red only on dangerous speed or low-AGL excessive sink)
+    const speedMaxScale = 15.0;
     const speedMag = Math.hypot(lander.vel.x, lander.vel.y);
-    const speedNorm = Math.min(1, speedMag / 6.0);
-    const speedWarn =
-      Math.abs(Math.min(0, lander.vel.y)) > PHYSICS.SURVIVAL_VS_MAX
-        ? COLORS.RED_KLAXON
-        : COLORS.AMBER_CAUTION;
+    const speedNorm = Math.min(1, speedMag / speedMaxScale);
+    const speedIsRed =
+      speedMag > 11.8 || (lander.agl < 36 && lander.vel.y < -PHYSICS.SURVIVAL_VS_MAX);
+    const speedWarn = speedIsRed ? COLORS.RED_KLAXON : COLORS.AMBER_CAUTION;
     this.drawChunkyNeedleDial(
       ctx,
       leftColCx,
-      gaugesTopY + dialR + 6 + rowStep,
+      gaugesTopY + dialR + 4 + rowStep,
       dialR,
       speedNorm,
-      PHYSICS.SAFE_VS_MAX / 6.0,
+      PHYSICS.SAFE_VS_MAX / speedMaxScale,
       'SPEED',
       speedWarn,
-      false
+      false,
+      `${speedMag.toFixed(1)} M/S`
     );
 
-    // Gauge C: DRIFT Dial
-    const driftSigned = Math.max(-1, Math.min(1, lander.vel.x / 3.5));
-    const driftCol =
-      Math.abs(lander.vel.x) > PHYSICS.SURVIVAL_HS_MAX ? COLORS.RED_KLAXON : COLORS.AMBER_CAUTION;
+    // Gauge C: DRIFT Dial (Scaled to +/-8.5 M/S full-scale)
+    const driftSigned = Math.max(-1, Math.min(1, lander.vel.x / 8.5));
+    const driftCol = hsDangerous ? COLORS.RED_KLAXON : COLORS.AMBER_CAUTION;
     this.drawChunkyNeedleDial(
       ctx,
       leftColCx,
-      gaugesTopY + dialR + 6 + rowStep * 2,
+      gaugesTopY + dialR + 4 + rowStep * 2,
       dialR,
       driftSigned,
       undefined,
@@ -372,7 +489,7 @@ export class HudRenderer {
     this.drawChunkyNeedleDial(
       ctx,
       rightColCx,
-      gaugesTopY + dialR + 6 + rowStep * 2,
+      gaugesTopY + dialR + 4 + rowStep * 2,
       dialR,
       thrustNorm,
       1.0 / PHYSICS.OVERDRIVE_MULTIPLIER,
@@ -382,32 +499,31 @@ export class HudRenderer {
     );
 
     // Hull & Optic Status Footer
-    if (clusterH >= 485) {
-      ctx.font = 'bold 11.5px "Share Tech Mono", monospace';
-      ctx.textAlign = 'center';
-      const sysBroken = lander.strutDamaged || lander.rcsDamaged;
-      ctx.fillStyle = sysBroken ? COLORS.RED_KLAXON : COLORS.GREEN_PRIMARY;
-      const sysTxt = sysBroken
-        ? `HULL ${Math.round(lander.hullIntegrity)}% // ${lander.strutDamaged ? 'GEAR-DMG ' : ''}${lander.rcsDamaged ? 'RCS-DMG' : ''}`
-        : `HULL ${Math.round(lander.hullIntegrity)}% // ${state.bezel.sasEnabled ? 'SAS ON' : 'MANUAL'} // ${state.cameraZoom.toFixed(1)}X`;
-      ctx.fillText(sysTxt, rx + clusterW * 0.5, ry + clusterH - 11);
-    }
+    ctx.font = 'bold 11.5px "Share Tech Mono", monospace';
+    ctx.textAlign = 'center';
+    const sysBroken = lander.strutDamaged || lander.rcsDamaged;
+    ctx.fillStyle = sysBroken ? COLORS.RED_KLAXON : COLORS.GREEN_PRIMARY;
+    const sysTxt = sysBroken
+      ? `HULL ${Math.round(lander.hullIntegrity)}% // ${lander.strutDamaged ? 'GEAR-DMG ' : ''}${lander.rcsDamaged ? 'RCS-DMG' : ''}`
+      : `HULL ${Math.round(lander.hullIntegrity)}% // ${state.bezel.sasEnabled ? 'SAS ON' : 'MANUAL'} // ${state.cameraZoom.toFixed(1)}X`;
+    ctx.fillText(sysTxt, baseW * 0.5, baseH - 12);
+    ctx.restore();
 
     // ---------------------------------------------------------------------
-    // EVEN LARGER LEFT TACTICAL STACK:
-    // 1) GIANT MISSION SCORE + [SPACE] EMERGENCY PULSE + 3 RADAR PING CELLS
-    // 2) LARGER INERTIAL ATTITUDE GYRO + WIND COMPASS
-    // 3) EXPANDED 2D LANDING PAD TOPOGRAPHY & GLIDE-SLOPE MAP
+    // LEFT TACTICAL STACK (WINDOW-SCALED):
+    // 1) GIANT MISSION SCORE + [SPACE] 1X GAME PULSE + 3 RADAR PING CELLS
+    // 2) INERTIAL ATTITUDE GYRO + WIND COMPASS
+    // 3) 2D LANDING PAD TOPOGRAPHY & GLIDE-SLOPE MAP
     // ---------------------------------------------------------------------
-    const lx = 16;
-    const ly = 44;
-    const leftW = Math.min(324, Math.max(268, Math.round(w * 0.275)));
+    ctx.save();
+    ctx.translate(layout.marginX, layout.topHeaderY);
+    ctx.scale(s, s);
 
     this.drawScoreAndRadarRack(
       ctx,
-      lx,
-      ly,
-      leftW,
+      0,
+      0,
+      baseW,
       state.displayedScore,
       state.dropStreak,
       state.sectorElapsedSec,
@@ -415,33 +531,58 @@ export class HudRenderer {
       state.timeSec
     );
 
-    const gyroY = ly + 174;
-    this.drawAttitudeAndWindPod(ctx, lx, gyroY, leftW, lander, sector, windKnots);
+    this.drawAttitudeAndWindPod(ctx, 0, 172, baseW, lander, sector, windKnots);
 
     if (targetPadInfo && lander.alive && (state.phase === 'FLIGHT' || state.phase === 'PAUSED')) {
-      const mapY = gyroY + 176;
-      const availH = h - mapY - 24;
-      if (availH >= 150) {
-        this.drawProximityApproachSubWindow(
-          ctx,
-          lx,
-          mapY,
-          leftW,
-          Math.min(240, availH),
-          sector,
-          lander,
-          targetPadInfo.pad,
-          targetPadInfo.dist
-        );
-      }
+      this.drawProximityApproachSubWindow(
+        ctx,
+        0,
+        346,
+        baseW,
+        238,
+        sector,
+        lander,
+        targetPadInfo.pad,
+        targetPadInfo.dist
+      );
+    }
+    ctx.restore();
+
+    // ---------------------------------------------------------------------
+    // NEW LARGE TOP-CENTER GO / NO-GO APPROACH HUD (WHEN IN PAD PROXIMITY)
+    // ---------------------------------------------------------------------
+    if (
+      targetPadInfo &&
+      targetPadInfo.dist <= PHYSICS.APPROACH_PROXIMITY_M &&
+      lander.alive &&
+      (state.phase === 'FLIGHT' || state.phase === 'PAUSED')
+    ) {
+      this.drawTopGoNoGoHud(
+        ctx,
+        w,
+        layout,
+        lander,
+        targetPadInfo.pad,
+        targetPadInfo.dist,
+        state.timeSec
+      );
     }
 
-    this.drawHazardAlerts(ctx, w, lander, sector, state.timeSec);
+    // ---------------------------------------------------------------------
+    // NEW LARGE BOTTOM-CENTER AIRBUS AVIONICS WARNING BAR
+    // ---------------------------------------------------------------------
+    this.drawBottomAirbusWarnings(
+      ctx,
+      w,
+      h,
+      layout,
+      lander,
+      state.activeCalloutText && state.activeCalloutTimer > 0 ? state.activeCalloutText : null,
+      state.timeSec
+    );
 
-    if (state.activeCalloutText && state.activeCalloutTimer > 0) {
-      this.drawIntercomBanner(ctx, w, h, state.activeCalloutText, state.timeSec);
-    } else if (state.statusBannerText && state.statusBannerTimer > 0) {
-      this.drawStatusToast(ctx, w, state.statusBannerText);
+    if (state.statusBannerText && state.statusBannerTimer > 0) {
+      this.drawStatusToast(ctx, w, h, layout, state.statusBannerText);
     }
 
     ctx.restore();
@@ -527,7 +668,7 @@ export class HudRenderer {
     // =====================================================================
     const splitX = x + Math.round(w * 0.52);
 
-    // 1. Left Box: [SPACE] EMERGENCY PULSE
+    // 1. Left Box: [SPACE] 1X GAME PULSE
     const pulseArmed = lander.emergencyPulseAvailable;
     const pulseFiring = lander.emergencyPulseTimer > 0;
     ctx.textAlign = 'left';
@@ -537,7 +678,7 @@ export class HudRenderer {
       : pulseArmed
         ? COLORS.AMBER_BRIGHT
         : COLORS.RED_KLAXON;
-    ctx.fillText('[SPACE] EMERG PULSE', x + 14, y + 104);
+    ctx.fillText('[SPACE] 1X GAME PULSE', x + 14, y + 104);
 
     const pBoxX = x + 14;
     const pBoxY = y + 112;
@@ -555,14 +696,14 @@ export class HudRenderer {
     }
 
     ctx.textAlign = 'center';
-    ctx.font = 'bold 13px "JetBrains Mono", monospace';
+    ctx.font = 'bold 12.5px "JetBrains Mono", monospace';
     ctx.fillStyle = pulseFiring
       ? '#FFFFFF'
       : pulseArmed
         ? COLORS.AMBER_BRIGHT
         : COLORS.RED_KLAXON;
     ctx.fillText(
-      pulseFiring ? '>> FIRING <<' : pulseArmed ? 'ARMED [1/1]' : 'EXPENDED',
+      pulseFiring ? '>> FIRING <<' : pulseArmed ? 'ARMED [1/GAME]' : 'EXPENDED',
       pBoxX + pBoxW * 0.5,
       pBoxY + 24
     );
@@ -710,7 +851,8 @@ export class HudRenderer {
     safeTickRatio: number | undefined,
     label: string,
     activeCol: string,
-    centerZero: boolean
+    centerZero: boolean,
+    subValue?: string
   ): void {
     ctx.save();
     const startAng = (150 * Math.PI) / 180;
@@ -787,7 +929,12 @@ export class HudRenderer {
     ctx.textAlign = 'center';
     ctx.font = 'bold 12.5px "Share Tech Mono", monospace';
     ctx.fillStyle = activeCol;
-    ctx.fillText(label, cx, cy + r + 15);
+    ctx.fillText(label, cx, cy + r + 14);
+    if (subValue) {
+      ctx.font = 'bold 10.5px "JetBrains Mono", monospace';
+      ctx.fillStyle = COLORS.AMBER_BRIGHT;
+      ctx.fillText(subValue, cx, cy + r + 26);
+    }
     ctx.restore();
   }
 
@@ -1033,43 +1180,29 @@ export class HudRenderer {
 
     const vs = Math.abs(Math.min(0, lander.vel.y));
     const hs = Math.abs(lander.vel.x);
-    const deg = Math.abs((lander.angle * 180) / Math.PI);
     const padCenter = (pad.x1 + pad.x2) * 0.5;
     const padHalfW = (pad.x2 - pad.x1) * 0.5;
     const aligned = Math.abs(lander.pos.x - padCenter) + PHYSICS.STRUT_SPAN_HALF_X <= padHalfW + 0.85;
+    const vsGo = vs <= PHYSICS.SAFE_VS_MAX;
+    const hsGo = hs <= PHYSICS.SAFE_HS_MAX;
 
-    const vsGo = vs < PHYSICS.SAFE_VS_MAX;
-    const vsKiss = vs < PHYSICS.KISS_VS_MAX;
-    const hsGo = hs < PHYSICS.SAFE_HS_MAX;
-    const hsKiss = hs < PHYSICS.KISS_HS_MAX;
-    const attGo = deg <= PHYSICS.SAFE_ANGLE_DEG;
-
-    // Compact 2x2 Avionics Go/No-Go Grid
-    const cells = [
-      { k: 'V/S', v: `${vs.toFixed(1)}`, ok: vsGo, tag: vsKiss ? 'KISS' : vsGo ? 'GO' : 'HIGH' },
-      { k: 'H/S', v: `${hs.toFixed(1)}`, ok: hsGo, tag: hsKiss ? 'KISS' : hsGo ? 'GO' : 'DRFT' },
-      { k: 'ATT', v: `${deg.toFixed(1)}°`, ok: attGo, tag: attGo ? 'GO' : 'BANK' },
-      { k: 'ALN', v: `${(lander.pos.x - padCenter >= 0 ? '+' : '') + (lander.pos.x - padCenter).toFixed(0)}M`, ok: aligned, tag: aligned ? 'LOCK' : 'OFF' },
-    ];
-
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
-    cells.forEach((c, idx) => {
-      const col = idx % 2;
-      const row = Math.floor(idx / 2);
-      const cx = x + 10 + col * ((w - 20) * 0.52);
-      const cy = y + 39 + row * 18;
-      ctx.textAlign = 'left';
-      ctx.fillStyle = COLORS.GREEN_MID;
-      ctx.fillText(`${c.k}:`, cx, cy);
-      ctx.fillStyle = c.ok ? COLORS.GREEN_PRIMARY : COLORS.RED_KLAXON;
-      ctx.fillText(`${c.v} [${c.tag}]`, cx + 32, cy);
-    });
+    const offsetM = lander.pos.x - padCenter;
+    ctx.font = 'bold 11.5px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = COLORS.GREEN_MID;
+    ctx.fillText('PAD ALIGN:', x + 10, y + 38);
+    ctx.fillStyle = aligned ? COLORS.GREEN_BRIGHT : COLORS.AMBER_CAUTION;
+    ctx.fillText(
+      `${offsetM >= 0 ? '+' : ''}${offsetM.toFixed(1)}M [${aligned ? 'LOCK' : 'OFFSET'}]`,
+      x + 86,
+      y + 38
+    );
 
     // Live 2D Topographic Approach & Glide-Slope Map Window
     const mapX = x + 10;
-    const mapY = y + 66;
+    const mapY = y + 48;
     const mapW = w - 20;
-    const mapH = Math.max(66, boxH - 76);
+    const mapH = Math.max(80, boxH - 58);
 
     ctx.fillStyle = 'rgba(2, 6, 3, 0.92)';
     ctx.fillRect(mapX, mapY, mapW, mapH);
@@ -1162,113 +1295,276 @@ export class HudRenderer {
     ctx.restore();
   }
 
-  private drawHazardAlerts(
+  /**
+   * NEW LARGE TOP-CENTER GO / NO-GO LANDING ENVELOPE HUD
+   * Automatically engages when within pad proximity (<= 90m) and displays the 3 core
+   * touchdown GO / NO-GO criteria (DESCENT V/S, DRIFT H/S, ATTITUDE) in bold illuminated cards.
+   */
+  private drawTopGoNoGoHud(
     ctx: CanvasRenderingContext2D,
     w: number,
+    layout: HudLayoutMetrics,
     lander: LanderState,
-    sector: SectorConfig,
+    pad: LandingPad,
+    distM: number,
     timeSec: number
   ): void {
-    if (!lander.alive) return;
-    const pulse = Math.sin(timeSec * 14) > -0.2;
-    const alerts: Array<{ text: string; color: string }> = [];
+    const cs = layout.centerScale;
+    const basePanelW = 548;
+    const basePanelH = 98;
+    const cx = w * 0.5;
+    const topY = layout.topHeaderY;
 
-    if (lander.ceilingClearance < 8 && lander.vel.y > 1.4) {
-      alerts.push({ text: 'OBSTACLE // CEILING', color: COLORS.RED_KLAXON });
-    }
-    if (lander.agl < 18 && lander.vel.y < -3.7 && lander.throttle < 0.8) {
-      alerts.push({
-        text: lander.agl < 15 && lander.vel.y < -4.6 ? 'PULL UP' : 'DESCENT RATE',
-        color: COLORS.RED_KLAXON,
-      });
-    }
-    if (lander.agl < 16 && Math.abs(lander.vel.x) > 2.6) {
-      alerts.push({ text: 'LATERAL DRIFT', color: COLORS.AMBER_CAUTION });
-    }
-    if (lander.agl < 36 && Math.abs((lander.angle * 180) / Math.PI) > 32.0) {
-      alerts.push({ text: 'BANK ANGLE', color: COLORS.AMBER_CAUTION });
-    }
-    if (lander.inWindShear) {
-      alerts.push({ text: 'WIND SHEAR', color: COLORS.AMBER_CAUTION });
-    }
-    if (lander.inThermalUpdraft) {
-      alerts.push({ text: 'THERMAL UPDRAFT', color: COLORS.AMBER_CAUTION });
-    }
-    if ((sector.darknessLevel > 0.7 || sector.emInterference > 0.45) && lander.radarCharges > 0) {
-      alerts.push({
-        text: `[LEFT-CLICK] PING RADAR (${lander.radarCharges} LEFT)`,
-        color: COLORS.GREEN_PRIMARY,
-      });
-    }
+    const vs = Math.abs(Math.min(0, lander.vel.y));
+    const hs = Math.abs(lander.vel.x);
+    const deg = Math.abs((lander.angle * 180) / Math.PI);
 
-    if (alerts.length === 0) return;
+    const vsGo = vs <= PHYSICS.SAFE_VS_MAX;
+    const vsKiss = vs < PHYSICS.KISS_VS_MAX;
+    const vsFatal = vs > PHYSICS.SURVIVAL_VS_MAX;
+
+    const hsGo = hs <= PHYSICS.SAFE_HS_MAX;
+    const hsKiss = hs < PHYSICS.KISS_HS_MAX;
+    const hsFatal = hs > PHYSICS.SURVIVAL_HS_MAX;
+
+    const attGo = deg <= PHYSICS.SAFE_ANGLE_DEG;
+    const attFatal = deg > PHYSICS.SURVIVAL_ANGLE_DEG;
+
+    const allGo = vsGo && hsGo && attGo;
+    const allKiss = vsKiss && hsKiss && attGo;
+    const anyFatal = vsFatal || hsFatal || attFatal;
 
     ctx.save();
-    ctx.textAlign = 'center';
+    ctx.translate(cx - (basePanelW * cs) * 0.5, topY);
+    ctx.scale(cs, cs);
+
+    ctx.fillStyle = 'rgba(3, 9, 5, 0.92)';
+    ctx.fillRect(0, 0, basePanelW, basePanelH);
+
+    const frameCol = allGo
+      ? COLORS.GREEN_PRIMARY
+      : anyFatal
+        ? COLORS.RED_KLAXON
+        : COLORS.AMBER_CAUTION;
+    this.drawCornerBrackets(ctx, 0, 0, basePanelW, basePanelH, 14, frameCol, 2.6);
+
+    // Header Bar: Pad Lock + Master GO / NO-GO Status
+    const padTag = pad.type === 'DEPOT' ? '+FUEL DEPOT' : `${pad.multiplier}X`;
+    ctx.textAlign = 'left';
     ctx.font = 'bold 13.5px "Share Tech Mono", monospace';
-    const centerSlotX = w * 0.48;
-    alerts.slice(0, 2).forEach((al, idx) => {
-      if (al.color === COLORS.RED_KLAXON && !pulse) return;
-      const ay = 62 + idx * 28;
-      const tw = ctx.measureText(al.text).width + 28;
-      ctx.fillStyle = 'rgba(8, 19, 12, 0.9)';
-      ctx.fillRect(centerSlotX - tw * 0.5, ay - 15, tw, 23);
-      ctx.strokeStyle = al.color;
-      ctx.lineWidth = 2.0;
-      ctx.strokeRect(centerSlotX - tw * 0.5, ay - 15, tw, 23);
-      ctx.fillStyle = al.color;
-      ctx.fillText(al.text, centerSlotX, ay + 1);
+    ctx.fillStyle = COLORS.AMBER_BRIGHT;
+    ctx.fillText(`LANDING GATE // ${pad.label} [${padTag}] // ${distM.toFixed(0)}M`, 14, 20);
+
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 14.5px "Share Tech Mono", monospace';
+    const blink = 0.8 + 0.2 * Math.sin(timeSec * 12);
+    ctx.globalAlpha = allGo ? 1 : blink;
+    ctx.fillStyle = allGo
+      ? COLORS.GREEN_BRIGHT
+      : anyFatal
+        ? COLORS.RED_KLAXON
+        : COLORS.AMBER_BRIGHT;
+    ctx.fillText(
+      allKiss
+        ? '★ SOFT KISS: GO ★'
+        : allGo
+          ? '● TOUCHDOWN: GO ●'
+          : '▲ TOUCHDOWN: NO-GO ▲',
+      basePanelW - 14,
+      20
+    );
+    ctx.globalAlpha = 1;
+
+    // 3 Large Side-by-Side GO / NO-GO Criteria Modules
+    const criteria = [
+      {
+        title: 'DESCENT V/S',
+        valueStr: `${vs.toFixed(1)} M/S`,
+        limitStr: `MAX ${PHYSICS.SAFE_VS_MAX.toFixed(1)}`,
+        go: vsGo,
+        kiss: vsKiss,
+        fatal: vsFatal,
+      },
+      {
+        title: 'DRIFT H/S',
+        valueStr: `${hs.toFixed(1)} M/S`,
+        limitStr: `MAX ${PHYSICS.SAFE_HS_MAX.toFixed(1)}`,
+        go: hsGo,
+        kiss: hsKiss,
+        fatal: hsFatal,
+      },
+      {
+        title: 'ATTITUDE',
+        valueStr: `${deg.toFixed(1)}°`,
+        limitStr: `MAX ${PHYSICS.SAFE_ANGLE_DEG.toFixed(0)}°`,
+        go: attGo,
+        kiss: false,
+        fatal: attFatal,
+      },
+    ];
+
+    const gap = 10;
+    const cardW = (basePanelW - 24 - gap * 2) / 3;
+    const cardY = 28;
+    const cardH = 60;
+
+    criteria.forEach((c, idx) => {
+      const cardX = 12 + idx * (cardW + gap);
+      const col = c.go
+        ? COLORS.GREEN_PRIMARY
+        : c.fatal
+          ? COLORS.RED_KLAXON
+          : COLORS.AMBER_CAUTION;
+      const brightCol = c.go
+        ? COLORS.GREEN_BRIGHT
+        : c.fatal
+          ? '#FF7A66'
+          : COLORS.AMBER_BRIGHT;
+
+      ctx.fillStyle = c.go
+        ? 'rgba(59, 224, 104, 0.12)'
+        : c.fatal
+          ? 'rgba(255, 51, 24, 0.16)'
+          : 'rgba(255, 140, 0, 0.14)';
+      ctx.fillRect(cardX, cardY, cardW, cardH);
+
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2.2;
+      ctx.strokeRect(cardX, cardY, cardW, cardH);
+
+      // Criterion Title & Limit on Top Row
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 11.5px "Share Tech Mono", monospace';
+      ctx.fillStyle = COLORS.GREEN_MID;
+      ctx.fillText(c.title, cardX + 8, cardY + 16);
+
+      ctx.textAlign = 'right';
+      ctx.font = 'bold 10.5px "JetBrains Mono", monospace';
+      ctx.fillStyle = col;
+      ctx.fillText(c.limitStr, cardX + cardW - 8, cardY + 16);
+
+      // Large Live Numeric Value on Bottom-Left
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 18px "JetBrains Mono", monospace';
+      ctx.fillStyle = brightCol;
+      ctx.fillText(c.valueStr, cardX + 8, cardY + 46);
+
+      // Large Bold GO / NO-GO Pill on Bottom-Right
+      const statusText = c.kiss ? 'KISS' : c.go ? 'GO' : 'NO-GO';
+      const pillW = c.go ? 52 : 64;
+      const pillH = 24;
+      const pillX = cardX + cardW - pillW - 7;
+      const pillY = cardY + 28;
+
+      ctx.fillStyle = col;
+      ctx.fillRect(pillX, pillY, pillW, pillH);
+
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 15px "Share Tech Mono", monospace';
+      ctx.fillStyle = '#030805';
+      ctx.fillText(statusText, pillX + pillW * 0.5, pillY + 17.5);
     });
+
     ctx.restore();
   }
 
-  private drawIntercomBanner(
+  /**
+   * NEW LARGE BOTTOM-CENTER AIRBUS AVIONICS WARNING BAR
+   * Renders terse Airbus-style warnings ("SINK RATE", "PULL UP", "BANK ANGLE", "WIND SHEAR", etc.)
+   * in large, unmistakable cockpit annunciator modules along the bottom of the visor.
+   */
+  private drawBottomAirbusWarnings(
     ctx: CanvasRenderingContext2D,
     w: number,
     h: number,
-    text: string,
+    layout: HudLayoutMetrics,
+    lander: LanderState,
+    activeVoiceText: string | null,
     timeSec: number
   ): void {
+    const warnings = HudRenderer.computeAvionicsWarnings(lander);
+    if (warnings.length === 0 && !activeVoiceText) return;
+
+    const cs = layout.centerScale;
+    const cx = w * 0.5;
+    const pulseAlpha = 0.78 + 0.22 * Math.sin(timeSec * 13);
+
+    // Combine up to 2 primary Airbus warnings (or active GPWS voice callout if no visual warning)
+    const displayItems: AvionicsWarningItem[] =
+      warnings.length > 0
+        ? warnings.slice(0, 2)
+        : [{ text: activeVoiceText!.replace(/\.$/, ''), critical: true }];
+
     ctx.save();
-    const bw = Math.min(540, w - 300);
-    const bh = 38;
-    const bx = Math.max(24, w * 0.47 - bw * 0.5);
-    const by = h - 58;
+    ctx.translate(cx, h - 24);
+    ctx.scale(cs, cs);
 
-    ctx.fillStyle = 'rgba(8, 19, 12, 0.94)';
-    ctx.fillRect(bx, by, bw, bh);
-    ctx.strokeStyle = COLORS.AMBER_CAUTION;
-    ctx.lineWidth = 2.0;
-    ctx.strokeRect(bx, by, bw, bh);
+    const pillGap = 14;
+    const boxH = 44;
+    ctx.font = 'bold 22px "Share Tech Mono", monospace';
 
-    for (let i = 0; i < 5; i++) {
-      const amp = 5 + Math.abs(Math.sin(timeSec * 16 + i * 1.4)) * 16;
-      ctx.fillStyle = COLORS.AMBER_BRIGHT;
-      ctx.fillRect(bx + 12 + i * 6, by + bh * 0.5 - amp * 0.5, 4, amp);
-    }
+    const widths = displayItems.map((it) => {
+      const label = it.critical ? `▲ ${it.text} ▲` : `◆ ${it.text} ◆`;
+      return Math.max(196, ctx.measureText(label).width + 40);
+    });
+    const totalW = widths.reduce((a, b) => a + b, 0) + pillGap * (displayItems.length - 1);
 
-    ctx.font = 'bold 14px "Share Tech Mono", monospace';
-    ctx.fillStyle = COLORS.GREEN_BRIGHT;
-    ctx.textAlign = 'left';
-    ctx.fillText(`GPWS // ${text}`, bx + 48, by + 24);
+    let curX = -totalW * 0.5;
+    const boxY = -boxH - 6;
+
+    displayItems.forEach((it, idx) => {
+      const bw = widths[idx];
+      const col = it.critical ? COLORS.RED_KLAXON : COLORS.AMBER_CAUTION;
+      const textCol = it.critical ? '#FF6B54' : COLORS.AMBER_BRIGHT;
+      const label = it.critical ? `▲ ${it.text} ▲` : `◆ ${it.text} ◆`;
+
+      ctx.globalAlpha = it.critical ? pulseAlpha : 0.94;
+      ctx.fillStyle = it.critical ? 'rgba(28, 5, 4, 0.94)' : 'rgba(18, 12, 3, 0.94)';
+      ctx.fillRect(curX, boxY, bw, boxH);
+
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 3.0;
+      ctx.strokeRect(curX, boxY, bw, boxH);
+
+      ctx.strokeStyle = it.critical ? 'rgba(255, 51, 24, 0.45)' : 'rgba(255, 140, 0, 0.4)';
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(curX + 4, boxY + 4, bw - 8, boxH - 8);
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = textCol;
+      ctx.fillText(label, curX + bw * 0.5, boxY + 30);
+
+      curX += bw + pillGap;
+    });
+
     ctx.restore();
   }
 
-  private drawStatusToast(ctx: CanvasRenderingContext2D, w: number, text: string): void {
+  private drawStatusToast(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    layout: HudLayoutMetrics,
+    text: string
+  ): void {
+    const cs = layout.centerScale;
     ctx.save();
-    ctx.font = 'bold 13.5px "Share Tech Mono", monospace';
-    const tw = ctx.measureText(text).width + 32;
-    const cx = w * 0.48;
-    const bx = cx - tw * 0.5;
-    const by = 118;
+    ctx.translate(w * 0.5, h - Math.round(88 * cs));
+    ctx.scale(cs, cs);
+
+    ctx.font = 'bold 14.5px "Share Tech Mono", monospace';
+    const tw = ctx.measureText(text).width + 36;
+    const bx = -tw * 0.5;
+    const by = -28;
+
     ctx.fillStyle = 'rgba(8, 19, 12, 0.92)';
-    ctx.fillRect(bx, by, tw, 26);
+    ctx.fillRect(bx, by, tw, 28);
     ctx.strokeStyle = COLORS.AMBER_CAUTION;
     ctx.lineWidth = 2.0;
-    ctx.strokeRect(bx, by, tw, 26);
-    ctx.fillStyle = COLORS.AMBER_CAUTION;
+    ctx.strokeRect(bx, by, tw, 28);
+    ctx.fillStyle = COLORS.AMBER_BRIGHT;
     ctx.textAlign = 'center';
-    ctx.fillText(text, cx, by + 18);
+    ctx.fillText(text, 0, by + 19);
     ctx.restore();
   }
 
@@ -1552,7 +1848,7 @@ export class HudRenderer {
       '[W / UP]       MAIN ENGINE (+SHIFT: MAX OVERDRIVE)',
       '[A / D]        FAST RCS ATTITUDE THRUSTERS',
       '[S / DOWN]     RETRO-STABILIZER ASSIST (DAMP DRIFT)',
-      '[SPACEBAR]     1X EXTREME EMERGENCY THRUST PULSE',
+      '[SPACEBAR]     1X PER GAME EMERGENCY THRUST PULSE',
     ];
     const rightControls = [
       '[MOUSE AIM]    STEER NOSE HEADLIGHT & RADAR CONE',

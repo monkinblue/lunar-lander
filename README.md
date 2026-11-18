@@ -24,7 +24,7 @@ A desktop-first, retro-futuristic vector **Lunar Lander** simulation inspired by
 | `Shift` + `W` / `Up` | **Emergency Max Overdrive Burn** (`135%` thrust at higher propellant burn rate) |
 | `A` / `D` or `Left` / `Right` | **RCS Cold-Gas Attitude Thrusters** (high-authority roll speed with preserved rotational momentum) |
 | `S` or `Down Arrow` | **Retro-Stabilizer Assist** (damps spin, uprights attitude, and arrests lateral drift) |
-| `Spacebar` | **One-Time Emergency Solid-Rocket Thrust Pulse** (single-use high-G pyrotechnic abort kick per sector) |
+| `Spacebar` | **One-Time Emergency Solid-Rocket Thrust Pulse** (single-use high-G pyrotechnic abort kick **once per game**) |
 | `R` | **Instant Sector Quick-Retry** |
 | `Esc` | **MU-TH-UR 6000 Command Interrupt / Pause Overlay** |
 

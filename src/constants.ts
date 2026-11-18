@@ -69,7 +69,7 @@ export const PHYSICS = {
   LIDAR_DECAY_SECONDS: 2.35,
 
   // Approach & Landing Thresholds
-  APPROACH_PROXIMITY_M: 80,
+  APPROACH_PROXIMITY_M: 90,
   SAFE_VS_MAX: 2.2,
   SAFE_HS_MAX: 1.2,
   SAFE_ANGLE_DEG: 7.0,

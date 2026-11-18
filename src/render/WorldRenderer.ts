@@ -182,7 +182,11 @@ export class WorldRenderer {
 
             ctx.fillStyle = 'rgba(255, 140, 0, 0.74)';
             const arrow = band.baseVx > 0 ? '>>>' : '<<<';
-            ctx.fillText(`SHEAR ${band.minY}M // ${band.label} ${arrow}`, 24, left.y - 6);
+            ctx.fillText(
+              `SHEAR ${band.minY}M // ${band.label} ${arrow}`,
+              Math.max(24, left.x + 10),
+              left.y - 6
+            );
           }
         }
       }

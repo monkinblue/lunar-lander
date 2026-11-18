@@ -757,7 +757,6 @@ export class PhysicsEngine {
           }
         }
         if (lander.groundedTime > 0.8) {
-          lander.emergencyPulseAvailable = true;
           lander.strutDamaged = false;
           lander.rcsDamaged = false;
           lander.hullIntegrity = Math.min(100, lander.hullIntegrity + 16 * dt);

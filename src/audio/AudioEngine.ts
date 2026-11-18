@@ -803,6 +803,57 @@ export class AudioEngine {
     return g;
   }
 
+  /**
+   * Soft, warm, muted flight-deck indicator pulse whenever bottom Airbus warnings are active.
+   * Heavily low-passed (620-760 Hz) with rounded envelopes so it adds tactile cockpit awareness
+   * without ever sounding shrill or fatiguing.
+   */
+  public playMutedAvionicsIndicatorBeep(isCritical: boolean): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    const now = this.ctx.currentTime;
+
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = isCritical ? 740 : 580;
+    lp.Q.value = 0.7;
+    lp.connect(this.masterGain);
+
+    if (isCritical) {
+      // Muted dual-tone Airbus-style low chime (420 Hz -> 335 Hz)
+      const notes = [
+        { freq: 420, offset: 0, dur: 0.075 },
+        { freq: 335, offset: 0.088, dur: 0.095 },
+      ];
+      for (const n of notes) {
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(n.freq, now + n.offset);
+        g.gain.setValueAtTime(0.0001, now + n.offset);
+        g.gain.linearRampToValueAtTime(0.19, now + n.offset + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + n.offset + n.dur);
+        osc.connect(g);
+        g.connect(lp);
+        osc.start(now + n.offset);
+        osc.stop(now + n.offset + n.dur + 0.015);
+      }
+    } else {
+      // Soft single muted amber caution pulse (330 Hz)
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(330, now);
+      osc.frequency.exponentialRampToValueAtTime(312, now + 0.11);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.linearRampToValueAtTime(0.14, now + 0.014);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.115);
+      osc.connect(g);
+      g.connect(lp);
+      osc.start(now);
+      osc.stop(now + 0.13);
+    }
+  }
+
   public playButtonLatchLock(pitch = 0.94, volume = 0.95): void {
     if (!this.ctx || !this.masterGain || this.muted) return;
     if (this.buffers.has('button_latch_lock')) {

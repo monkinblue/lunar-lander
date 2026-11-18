@@ -57,6 +57,7 @@ export class GameController {
   private endlessDepth = 1;
   private endlessSeed = 203779;
   private selectedStartSector = 1;
+  private gameEmergencyPulseAvailable = true;
   private missionScore = 0;
   private displayedScore = 0;
   private dropStreak = 0;
@@ -85,11 +86,13 @@ export class GameController {
   private statusBannerTimer = 0;
   private menuCursor = 0;
 
-  // Per-sector extreme Airbus GPWS cooldowns, motion tracker & thruster ignition edge
+  // Per-sector extreme Airbus GPWS cooldowns, motion tracker, muted warning indicator & ignition edge
   private sectorElapsedSec = 0;
   private proximityVoiceCooldown = 0;
   private bankAngleVoiceCooldown = 0;
   private driftVoiceCooldown = 0;
+  private avionicsBeepTimer = 0;
+  private hadActiveAvionicsWarning = false;
   private motionPingTimer = 0;
   private wasMainEngineLit = false;
 
@@ -545,14 +548,15 @@ export class GameController {
     if (this.phase === 'FLIGHT') {
       if (e.code === 'Space' && !e.repeat) {
         if (this.physics.triggerEmergencyThrustPulse(this.lander)) {
+          this.gameEmergencyPulseAvailable = false;
           this.audio.playButtonLatchLock(1.06, 0.72);
           this.audio.playEmergencyThrustPulse();
           this.glitchIntensity = Math.max(this.glitchIntensity, 0.55);
-          this.showStatusToast('!! EMERGENCY SOLID-ROCKET PULSE FIRED !!', 2.1);
-          this.logEvent(`EMERGENCY SOLID-ROCKET PULSE FIRED ON ${this.sector.code}`);
+          this.showStatusToast('!! 1X GAME EMERGENCY PULSE FIRED !!', 2.2);
+          this.logEvent(`1X GAME EMERGENCY PULSE FIRED ON ${this.sector.code}`);
         } else {
           this.audio.playButtonLatchLock(0.72, 0.65);
-          this.showStatusToast('EMERGENCY PULSE EXPENDED', 1.3);
+          this.showStatusToast('1X GAME PULSE ALREADY EXPENDED', 1.4);
         }
       } else if (e.code === 'KeyR' && !e.repeat) {
         this.audio.playButtonLatchLock();
@@ -655,6 +659,7 @@ export class GameController {
 
   private startCampaign(startSector: number): void {
     this.endlessMode = false;
+    this.gameEmergencyPulseAvailable = true;
     this.missionScore = 0;
     this.displayedScore = 0;
     this.dropStreak = 0;
@@ -664,6 +669,7 @@ export class GameController {
 
   private startEndlessDeepSurvey(): void {
     this.endlessMode = true;
+    this.gameEmergencyPulseAvailable = true;
     this.endlessDepth = 1;
     this.endlessSeed = (Date.now() & 0xffffffff) >>> 0;
     this.missionScore = 0;
@@ -677,11 +683,14 @@ export class GameController {
     this.sector = sec;
     this.highestSectorCode = sec.code;
     this.lander = this.physics.createInitialLander(sec);
+    this.lander.emergencyPulseAvailable = this.gameEmergencyPulseAvailable;
     this.cameraPos = { ...this.lander.pos };
-    this.manualZoom = 1.12;
-    this.currentZoom = 1.12;
+    this.manualZoom = 1.08;
+    this.currentZoom = 1.08;
     this.sectorElapsedSec = 0;
     this.briefingProgressChars = 0;
+    this.avionicsBeepTimer = 0;
+    this.hadActiveAvionicsWarning = false;
     this.motionPingTimer = 0;
     this.lastBreakdown = null;
     this.lastFailure = null;
@@ -703,8 +712,11 @@ export class GameController {
       : SectorGenerator.createCampaignSector(this.sector.index);
     this.sector = fresh;
     this.lander = this.physics.createInitialLander(fresh);
+    this.lander.emergencyPulseAvailable = this.gameEmergencyPulseAvailable;
     this.cameraPos = { ...this.lander.pos };
     this.sectorElapsedSec = 0;
+    this.avionicsBeepTimer = 0;
+    this.hadActiveAvionicsWarning = false;
     this.motionPingTimer = 0;
     this.lastFailure = null;
     this.glitchIntensity = 0.25;
@@ -858,9 +870,11 @@ export class GameController {
   }
 
   private buildCameraView(): CameraView {
+    const layout = HudRenderer.computeLayoutMetrics(this.crtRect.width, this.crtRect.height);
+    // Fit the full sector width cleanly inside the central safe corridor between Left & Right HUDs at 1.0x zoom!
     const basePxPerM = Math.min(
-      this.crtRect.width / 365,
-      this.crtRect.height / 235
+      layout.safeWidthPx / Math.max(380, this.sector.worldWidth + 16),
+      (this.crtRect.height - layout.topHeaderY - 56) / Math.max(210, this.sector.worldHeight + 18)
     );
     const pxPerMeter = basePxPerM * this.currentZoom;
 
@@ -1032,7 +1046,27 @@ export class GameController {
           this.motionPingTimer = 0.25;
         }
 
-        // 2. Extreme-Only Airbus GPWS Envelope Callouts (woman voice reserved strictly for severe emergencies)
+        // 2. Muted Flight-Deck Indicator Beep whenever Bottom Airbus Warnings are Indicating
+        const activeAvionicsWarnings = HudRenderer.computeAvionicsWarnings(this.lander);
+        if (this.avionicsBeepTimer > 0) {
+          this.avionicsBeepTimer = Math.max(0, this.avionicsBeepTimer - dt);
+        }
+        if (activeAvionicsWarnings.length > 0 && !this.bezelState.flightLogsOpen) {
+          const hasCritical = activeAvionicsWarnings.some((w) => w.critical);
+          if (!this.hadActiveAvionicsWarning && this.avionicsBeepTimer <= 0) {
+            this.audio.playMutedAvionicsIndicatorBeep(hasCritical);
+            this.avionicsBeepTimer = hasCritical ? 0.85 : 1.4;
+          } else if (this.avionicsBeepTimer <= 0) {
+            this.audio.playMutedAvionicsIndicatorBeep(hasCritical);
+            this.avionicsBeepTimer = hasCritical ? 0.85 : 1.4;
+          }
+          this.hadActiveAvionicsWarning = true;
+        } else {
+          this.hadActiveAvionicsWarning = false;
+          this.avionicsBeepTimer = Math.min(this.avionicsBeepTimer, 0.35);
+        }
+
+        // 3. Extreme-Only Airbus GPWS Envelope Callouts (woman voice reserved strictly for severe emergencies)
         const criticalPullUp = this.lander.agl < 14 && this.lander.vel.y < -4.6;
         const ceilingObstacle = this.lander.ceilingClearance < 8 && this.lander.vel.y > 1.5;
         const sinkRateWarn =
@@ -1200,18 +1234,18 @@ export class GameController {
 
   private updateCamera(dt: number): void {
     let targetZoom = this.manualZoom;
+    let minPadDist = Infinity;
+    for (const pad of this.sector.pads) {
+      const cx = (pad.x1 + pad.x2) * 0.5;
+      const d = Math.hypot(
+        this.lander.pos.x - cx,
+        this.lander.pos.y + PHYSICS.STRUT_REST_BOTTOM_Y - pad.y
+      );
+      if (d < minPadDist) minPadDist = d;
+    }
 
     if (this.bezelState.autoZoomEnabled && this.phase === 'FLIGHT' && this.lander.alive) {
-      // Smoothly zoom in when within 80m of any pad
-      let minPadDist = Infinity;
-      for (const pad of this.sector.pads) {
-        const cx = (pad.x1 + pad.x2) * 0.5;
-        const d = Math.hypot(
-          this.lander.pos.x - cx,
-          this.lander.pos.y + PHYSICS.STRUT_REST_BOTTOM_Y - pad.y
-        );
-        if (d < minPadDist) minPadDist = d;
-      }
+      // Smoothly zoom in when within approach gate of any pad
       if (minPadDist < PHYSICS.APPROACH_PROXIMITY_M) {
         const approachFactor = 1 - minPadDist / PHYSICS.APPROACH_PROXIMITY_M;
         const autoTarget = 1.15 + approachFactor * 1.35; // Up to ~2.5x automatic precision view
@@ -1223,28 +1257,50 @@ export class GameController {
 
     this.currentZoom += (targetZoom - this.currentZoom) * Math.min(1, dt * 3.8);
 
-    // Camera look-ahead based on shuttle velocity, clamped cleanly to sector bounds
+    // Camera tracking bounded to the Safe Central Flight Corridor between Left/Right/Top/Bottom HUDs
+    // so the craft NEVER slips behind any HUD panel even when zoomed out or near sector walls!
     const cam = this.buildCameraView();
-    const halfViewW = cam.widthPx / (2 * cam.pxPerMeter);
-    const halfViewH = cam.heightPx / (2 * cam.pxPerMeter);
+    const layout = HudRenderer.computeLayoutMetrics(this.crtRect.width, this.crtRect.height);
+    const halfSafeW = layout.safeWidthPx / (2 * cam.pxPerMeter);
+    const halfFullH = (cam.heightPx - layout.topHeaderY - 56) / (2 * cam.pxPerMeter);
 
-    let desiredX = this.lander.pos.x + this.lander.vel.x * 1.4;
-    let desiredY = this.lander.pos.y + this.lander.vel.y * 0.9 - 8;
+    let desiredX = this.lander.pos.x + this.lander.vel.x * 1.2;
+    let desiredY = this.lander.pos.y + this.lander.vel.y * 0.8 - 6;
 
     if (this.phase === 'TITLE_MENU') {
-      desiredX = this.sector.worldWidth * 0.5 + Math.sin(this.totalTimeSec * 0.18) * 55;
-      desiredY = 125;
+      desiredX = this.sector.worldWidth * 0.5 + Math.sin(this.totalTimeSec * 0.18) * 45;
+      desiredY = 120;
+    } else {
+      const minX = Math.min(this.sector.worldWidth * 0.5, halfSafeW - 8);
+      const maxX = Math.max(this.sector.worldWidth * 0.5, this.sector.worldWidth - halfSafeW + 8);
+      const minY = Math.max(12, halfFullH - 18);
+      const maxY = Math.max(minY + 10, this.sector.worldHeight - halfFullH + 26);
+
+      desiredX = Math.max(minX, Math.min(maxX, desiredX));
+      desiredY = Math.max(minY, Math.min(maxY, desiredY));
+
+      // Strict HUD Clearance Tether: keep shuttle strictly inside the central corridor between all HUDs
+      if (this.lander.alive) {
+        const maxCraftDx = Math.max(6, halfSafeW - 10);
+        desiredX = Math.max(
+          this.lander.pos.x - maxCraftDx,
+          Math.min(this.lander.pos.x + maxCraftDx, desiredX)
+        );
+
+        const topHudBottomPx =
+          minPadDist <= PHYSICS.APPROACH_PROXIMITY_M ? layout.safeTopPx : layout.topHeaderY + 16;
+        const botHudTopPx = layout.safeBottomPx;
+        const topClearM = Math.max(6, (cam.heightPx * 0.5 - topHudBottomPx - 14) / cam.pxPerMeter);
+        const botClearM = Math.max(6, (botHudTopPx - 14 - cam.heightPx * 0.5) / cam.pxPerMeter);
+
+        desiredY = Math.max(
+          this.lander.pos.y - topClearM,
+          Math.min(this.lander.pos.y + botClearM, desiredY)
+        );
+      }
     }
 
-    const minX = Math.min(this.sector.worldWidth * 0.5, halfViewW - 12);
-    const maxX = Math.max(this.sector.worldWidth * 0.5, this.sector.worldWidth - halfViewW + 12);
-    const minY = Math.max(15, halfViewH - 22);
-    const maxY = Math.max(minY + 10, this.sector.worldHeight - halfViewH + 34);
-
-    desiredX = Math.max(minX, Math.min(maxX, desiredX));
-    desiredY = Math.max(minY, Math.min(maxY, desiredY));
-
-    this.cameraPos.x += (desiredX - this.cameraPos.x) * Math.min(1, dt * 5.2);
-    this.cameraPos.y += (desiredY - this.cameraPos.y) * Math.min(1, dt * 5.2);
+    this.cameraPos.x += (desiredX - this.cameraPos.x) * Math.min(1, dt * 6.0);
+    this.cameraPos.y += (desiredY - this.cameraPos.y) * Math.min(1, dt * 6.0);
   }
 }
