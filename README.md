@@ -66,7 +66,7 @@ The game runs **out-of-the-box with zero console errors** using its built-in pro
    ```
 2. Add your ElevenLabs API key to `.env`:
    ```ini
-   ELEVENLABS_API_KEY=sk_your_actual_elevenlabs_api_key
+   ELEVENLABS_API_KEY=your_api_key_here
    # Optional: specify a custom clinical female voice ID (auto-selected via /v1/voices if omitted)
    # ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
    ```
