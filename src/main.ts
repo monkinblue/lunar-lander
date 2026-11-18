@@ -2,15 +2,14 @@ import { GameController } from './game/GameController';
 
 function bootstrap(): void {
   const webglCanvas = document.getElementById('crt-webgl-canvas') as HTMLCanvasElement | null;
-  const bezelCanvas = document.getElementById('bezel-ui-canvas') as HTMLCanvasElement | null;
   const srLive = document.getElementById('sr-telemetry-live');
   const shell = document.getElementById('console-shell');
 
-  if (!webglCanvas || !bezelCanvas) {
-    throw new Error('Console canvas elements missing from DOM.');
+  if (!webglCanvas) {
+    throw new Error('Console canvas element missing from DOM.');
   }
 
-  const controller = new GameController(webglCanvas, bezelCanvas, srLive);
+  const controller = new GameController(webglCanvas, srLive);
 
   // High-DPI responsive resize handling
   const handleResize = () => {

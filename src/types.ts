@@ -183,14 +183,29 @@ export interface SectorScoreBreakdown {
   accuracyPercent: number;
 }
 
+export type LeaderboardMode = 'CAMPAIGN' | 'ENDLESS';
+
 export interface CrewManifestEntry {
+  id?: string;
   callsign: string;
   score: number;
+  sector: number;
   highestSector: string;
   accuracyRating: string;
   accuracyPercent: number;
-  mode: 'CAMPAIGN' | 'DEEP-SURVEY';
+  mode: LeaderboardMode;
   date: string;
+  isArchiveFallback?: boolean;
+}
+
+export interface TouchdownSnapshot {
+  pad: LandingPad;
+  dist: number;
+  vs: number;
+  hs: number;
+  deg: number;
+  offsetM: number;
+  grade: LandingGrade;
 }
 
 export interface BezelState {
@@ -199,6 +214,7 @@ export interface BezelState {
   crtIntensity: number; // 0.0 to 1.0
   audioMuted: boolean;
   flightLogsOpen: boolean;
+  osdMenuOpen: boolean;
 }
 
 export interface ViewportRect {

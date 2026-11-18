@@ -69,8 +69,7 @@ export class WorldRenderer {
       cam,
       sector,
       renderPos,
-      effectiveEmInterference,
-      timeSec
+      effectiveEmInterference
     );
 
     // 6. Chunky Landing Pads & Blinking Approach Beacons
@@ -389,8 +388,7 @@ export class WorldRenderer {
     cam: CameraView,
     sector: SectorConfig,
     landerPos: Vec2,
-    emInterference: number,
-    timeSec: number
+    emInterference: number
   ): void {
     ctx.save();
 
@@ -453,7 +451,6 @@ export class WorldRenderer {
       landerPos,
       sector.darknessLevel,
       emInterference,
-      timeSec,
       1
     );
 
@@ -466,7 +463,6 @@ export class WorldRenderer {
         landerPos,
         sector.darknessLevel,
         emInterference,
-        timeSec,
         -1
       );
     }
@@ -602,7 +598,6 @@ export class WorldRenderer {
     landerPos: Vec2,
     darknessLevel: number,
     emInterference: number,
-    timeSec: number,
     tickDir: 1 | -1
   ): void {
     for (let i = 0; i < poly.length - 1; i++) {
@@ -625,16 +620,6 @@ export class WorldRenderer {
         darknessLevel,
         emInterference
       );
-
-      if (vis.staticObscured && Math.sin(i * 19.7 + timeSec * 23) > 0.62) {
-        const jitterY = Math.sin(i * 91.3 + timeSec * 47) * 14;
-        ctx.strokeStyle = 'rgba(68, 255, 119, 0.2)';
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.moveTo(sa.x, sa.y + jitterY);
-        ctx.lineTo(sa.x + 8, sa.y + jitterY);
-        ctx.stroke();
-      }
 
       const combinedAlpha = Math.max(vis.baseAlpha, vis.lidarAlpha);
       if (combinedAlpha < 0.025) continue;

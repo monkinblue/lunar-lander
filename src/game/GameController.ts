@@ -2,18 +2,21 @@ import { AudioEngine } from '../audio/AudioEngine';
 import { PHYSICS, VOICE_TRANSCRIPTS } from '../constants';
 import { SectorGenerator } from '../levels/SectorGenerator';
 import { PhysicsEngine } from '../physics/PhysicsEngine';
-import { BezelUI, type BezelControlId } from '../render/BezelUI';
 import { BOOT_LINES, HudRenderer } from '../render/HudRenderer';
 import { WebGLCRT } from '../render/WebGLCRT';
 import { WorldRenderer, type CameraView } from '../render/WorldRenderer';
-import { CrewManifestStore } from '../storage/CrewManifest';
+import { GlobalLeaderboardService, accuracyToGrade } from '../services/leaderboard';
 import type {
   BezelState,
   GamePhase,
   LanderState,
   LandingEvaluation,
+  LandingGrade,
+  LandingPad,
+  LeaderboardMode,
   SectorConfig,
   SectorScoreBreakdown,
+  TouchdownSnapshot,
   Vec2,
   ViewportRect,
   VoiceCalloutId,
@@ -21,38 +24,40 @@ import type {
 
 export class GameController {
   private webglCanvas: HTMLCanvasElement;
-  private bezelCanvas: HTMLCanvasElement;
-  private bezelCtx: CanvasRenderingContext2D;
   private offscreenCrtCanvas: HTMLCanvasElement;
   private offscreenCrtCtx: CanvasRenderingContext2D;
   private srLiveRegion: HTMLElement | null;
 
   private audio = new AudioEngine();
-  private manifest = new CrewManifestStore();
+  private leaderboard = new GlobalLeaderboardService();
   private physics = new PhysicsEngine();
   private webglCrt: WebGLCRT;
   private worldRenderer = new WorldRenderer();
   private hudRenderer = new HudRenderer();
-  private bezelUi = new BezelUI();
 
   private dpr = 1;
   private viewportWidth = 1280;
   private viewportHeight = 800;
-  private crtRect: ViewportRect = { x: 18, y: 16, width: 1080, height: 700 };
+  private crtRect: ViewportRect = { x: 0, y: 0, width: 1280, height: 800 };
 
   private phase: GamePhase = 'BOOT';
   private sector: SectorConfig;
   private lander: LanderState;
 
   private bezelState: BezelState = {
-    sasEnabled: true,
+    sasEnabled: false,
     autoZoomEnabled: true,
     crtIntensity: 0.0,
     audioMuted: false,
     flightLogsOpen: false,
+    osdMenuOpen: false,
   };
 
-  // Campaign / Deep-Survey Progression & Scoring
+  // Campaign / Deep-Survey 3-Lives Progression & Global Leaderboard State
+  private readonly maxLives = 3;
+  private lives = 3;
+  private lifeLostFlashTimer = 0;
+  private isPracticeRun = false;
   private endlessMode = false;
   private endlessDepth = 1;
   private endlessSeed = 203779;
@@ -61,13 +66,19 @@ export class GameController {
   private missionScore = 0;
   private displayedScore = 0;
   private dropStreak = 0;
+  private highestSectorNum = 1;
   private highestSectorCode = 'SEC-01';
   private accuracySamples: number[] = [];
 
   private lastBreakdown: SectorScoreBreakdown | null = null;
   private lastFailure: LandingEvaluation | null = null;
+  private touchdownSnapshot: TouchdownSnapshot | null = null;
   private tallyAnimProgress = 0;
-  private callsignDraft = 'RIPLEY';
+  private callsignDraft = 'PILOT-01';
+  private manifestTab: LeaderboardMode = 'CAMPAIGN';
+  private scoreSubmittedForRun = false;
+  private uplinkSubmitState: 'IDLE' | 'TRANSMITTING' | 'CONFIRMED' | 'OFFLINE_SAVED' = 'IDLE';
+  private uplinkConfirmText: string | null = null;
   private sessionLogs: string[] = [
     'INTERFACE 2037 INITIALIZED // ORBITAL BUS ONLINE',
     'AWAITING PILOT DROP TELEMETRY DIRECTIVE',
@@ -115,14 +126,9 @@ export class GameController {
 
   constructor(
     webglCanvas: HTMLCanvasElement,
-    bezelCanvas: HTMLCanvasElement,
     srLiveRegion: HTMLElement | null
   ) {
     this.webglCanvas = webglCanvas;
-    this.bezelCanvas = bezelCanvas;
-    const bCtx = bezelCanvas.getContext('2d');
-    if (!bCtx) throw new Error('Failed to initialize 2D context for bezel UI');
-    this.bezelCtx = bCtx;
 
     this.offscreenCrtCanvas = document.createElement('canvas');
     const oCtx = this.offscreenCrtCanvas.getContext('2d', { alpha: false });
@@ -135,6 +141,10 @@ export class GameController {
     this.sector = SectorGenerator.createCampaignSector(1);
     this.lander = this.physics.createInitialLander(this.sector);
     this.cameraPos = { ...this.lander.pos };
+    const savedSign = this.leaderboard.getSavedCallsign();
+    if (savedSign) {
+      this.callsignDraft = savedSign;
+    }
 
     this.bindInputListeners();
     this.bindAccessibilityButtons();
@@ -149,10 +159,7 @@ export class GameController {
     this.webglCanvas.width = Math.round(this.viewportWidth * this.dpr);
     this.webglCanvas.height = Math.round(this.viewportHeight * this.dpr);
 
-    this.bezelCanvas.width = Math.round(this.viewportWidth * this.dpr);
-    this.bezelCanvas.height = Math.round(this.viewportHeight * this.dpr);
-
-    this.crtRect = this.bezelUi.computeCrtViewport(this.viewportWidth, this.viewportHeight);
+    this.crtRect = { x: 0, y: 0, width: this.viewportWidth, height: this.viewportHeight };
     this.offscreenCrtCanvas.width = Math.round(this.crtRect.width * this.dpr);
     this.offscreenCrtCanvas.height = Math.round(this.crtRect.height * this.dpr);
   }
@@ -191,19 +198,24 @@ export class GameController {
 
   private bindAccessibilityButtons(): void {
     document.getElementById('a11y-sas-toggle')?.addEventListener('click', () => {
-      this.activateBezelControl('sas');
+      this.audio.playButtonLatchLock(0.92, 0.98);
+      this.handleHudButtonClick('hud-sas-toggle');
     });
     document.getElementById('a11y-zoom-toggle')?.addEventListener('click', () => {
-      this.activateBezelControl('autoZoom');
+      this.audio.playButtonLatchLock(0.92, 0.98);
+      this.handleHudButtonClick('hud-zoom-toggle');
     });
     document.getElementById('a11y-crt-step')?.addEventListener('click', () => {
-      this.activateBezelControl('crtDial');
+      this.audio.playButtonLatchLock(0.92, 0.98);
+      this.handleHudButtonClick('osd-crt-inc');
     });
     document.getElementById('a11y-mute-toggle')?.addEventListener('click', () => {
-      this.activateBezelControl('audioMute');
+      this.audio.playButtonLatchLock(0.92, 0.98);
+      this.handleHudButtonClick('hud-mute-toggle');
     });
     document.getElementById('a11y-logs-toggle')?.addEventListener('click', () => {
-      this.activateBezelControl('flightLogs');
+      this.audio.playButtonLatchLock(0.92, 0.98);
+      this.handleHudButtonClick('hud-logs-toggle');
     });
   }
 
@@ -225,7 +237,7 @@ export class GameController {
   private bindInputListeners(): void {
     window.addEventListener('keydown', (e) => {
       if (
-        ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)
+        ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)
       ) {
         e.preventDefault();
       }
@@ -246,23 +258,11 @@ export class GameController {
 
     window.addEventListener('blur', () => {
       this.keysDown.clear();
-      this.bezelUi.draggingDial = false;
     });
 
     window.addEventListener('pointermove', (e) => {
       this.pointerClient.x = e.clientX;
       this.pointerClient.y = e.clientY;
-
-      if (this.bezelUi.draggingDial) {
-        const val = this.bezelUi.dialValueFromPointer(e.clientX, e.clientY);
-        if (val !== null) {
-          this.bezelState.crtIntensity = val;
-        }
-        return;
-      }
-
-      const bezelHit = this.bezelUi.hitTest(e.clientX, e.clientY);
-      this.bezelUi.hoveredId = bezelHit;
 
       const mapped = this.webglCrt.mapClientToCrtUv(
         e.clientX,
@@ -270,17 +270,20 @@ export class GameController {
         this.crtRect,
         this.bezelState.crtIntensity
       );
-      this.pointerInsideCrt = mapped.inside && bezelHit === null;
+      this.pointerInsideCrt = mapped.inside;
       this.cursorCrtPx.x = mapped.u * this.crtRect.width;
       this.cursorCrtPx.y = mapped.v * this.crtRect.height;
 
       this.hoveredHudButtonId = this.hitTestHudButtons(this.cursorCrtPx.x, this.cursorCrtPx.y);
 
-      if (bezelHit === 'crtDial') {
-        document.body.style.cursor = 'grab';
-      } else if (bezelHit !== null || this.hoveredHudButtonId !== null) {
+      if (this.hoveredHudButtonId !== null) {
         document.body.style.cursor = 'pointer';
-      } else if (this.pointerInsideCrt && this.phase === 'FLIGHT' && !this.bezelState.flightLogsOpen) {
+      } else if (
+        this.pointerInsideCrt &&
+        this.phase === 'FLIGHT' &&
+        !this.bezelState.flightLogsOpen &&
+        !this.bezelState.osdMenuOpen
+      ) {
         document.body.style.cursor = 'crosshair';
       } else {
         document.body.style.cursor = 'default';
@@ -295,21 +298,7 @@ export class GameController {
       }
       void this.audio.unlock();
 
-      // 1. Hardware Bezel Controls outside curved glass
-      const bezelHit = this.bezelUi.hitTest(e.clientX, e.clientY);
-      if (bezelHit !== null) {
-        if (bezelHit === 'crtDial') {
-          this.bezelUi.draggingDial = true;
-          const val = this.bezelUi.dialValueFromPointer(e.clientX, e.clientY);
-          if (val !== null) this.bezelState.crtIntensity = val;
-          this.audio.playButtonLatchLock(1.06, 0.85);
-        } else {
-          this.activateBezelControl(bezelHit);
-        }
-        return;
-      }
-
-      // 2. CRT Terminal Buttons inside curved glass
+      // 1. CRT Terminal & On-Screen TV OSD Buttons inside curved glass
       const mapped = this.webglCrt.mapClientToCrtUv(
         e.clientX,
         e.clientY,
@@ -327,8 +316,13 @@ export class GameController {
         return;
       }
 
-      // 3. Left-Click during Flight: Focused Directional LIDAR Ping toward cursor (costs 1 cell)!
-      if (this.phase === 'FLIGHT' && !this.bezelState.flightLogsOpen && this.lander.alive) {
+      // 2. Left-Click during Flight: Focused Directional LIDAR Ping toward cursor (costs 1 cell)!
+      if (
+        this.phase === 'FLIGHT' &&
+        !this.bezelState.flightLogsOpen &&
+        !this.bezelState.osdMenuOpen &&
+        this.lander.alive
+      ) {
         const cam = this.buildCameraView();
         this.cursorWorld = this.worldRenderer.screenToWorld(cam, cx, cy);
         this.lander.spotlightAngle = Math.atan2(
@@ -347,25 +341,14 @@ export class GameController {
       }
     });
 
-    window.addEventListener('pointerup', () => {
-      this.bezelUi.draggingDial = false;
-    });
-
     window.addEventListener(
       'wheel',
       (e) => {
-        const bezelHit = this.bezelUi.hitTest(e.clientX, e.clientY);
-        if (bezelHit === 'crtDial') {
-          e.preventDefault();
-          const step = e.deltaY < 0 ? 0.06 : -0.06;
-          this.bezelState.crtIntensity = Math.max(
-            0,
-            Math.min(1, this.bezelState.crtIntensity + step)
-          );
-          return;
-        }
-
-        if (this.pointerInsideCrt && !this.bezelState.flightLogsOpen) {
+        if (
+          this.pointerInsideCrt &&
+          !this.bezelState.flightLogsOpen &&
+          !this.bezelState.osdMenuOpen
+        ) {
           e.preventDefault();
           const zoomDelta = e.deltaY < 0 ? 0.22 : -0.22;
           this.manualZoom = Math.max(1.0, Math.min(3.5, this.manualZoom + zoomDelta));
@@ -390,41 +373,69 @@ export class GameController {
     return null;
   }
 
-  private activateBezelControl(id: BezelControlId): void {
-    this.audio.playButtonLatchLock(0.92, 0.98);
+  private handleHudButtonClick(id: string): void {
     switch (id) {
-      case 'sas':
+      case 'hud-sas-toggle':
+      case 'osd-sas-toggle':
         this.bezelState.sasEnabled = !this.bezelState.sasEnabled;
         this.showStatusToast(
           `SAS ATTITUDE DAMPENER: ${this.bezelState.sasEnabled ? 'ENGAGED' : 'BYPASSED'}`
         );
         break;
-      case 'autoZoom':
+      case 'hud-zoom-toggle':
+      case 'osd-zoom-toggle':
         this.bezelState.autoZoomEnabled = !this.bezelState.autoZoomEnabled;
         this.showStatusToast(
           `AUTO-ZOOM APPROACH: ${this.bezelState.autoZoomEnabled ? 'ENGAGED' : 'MANUAL ONLY'}`
         );
         break;
-      case 'crtDial': {
-        const next = this.bezelState.crtIntensity + 0.25;
-        this.bezelState.crtIntensity = next > 1.05 ? 0.0 : Math.min(1.0, next);
-        this.showStatusToast(
-          `CRT GLASS & BLOOM: ${Math.round(this.bezelState.crtIntensity * 100)}%`
-        );
-        break;
-      }
-      case 'audioMute':
+      case 'hud-mute-toggle':
+      case 'osd-mute-toggle':
         this.bezelState.audioMuted = !this.bezelState.audioMuted;
         this.audio.setMuted(this.bezelState.audioMuted);
         break;
-      case 'flightLogs':
+      case 'hud-osd-toggle':
+      case 'pause-osd':
+        this.bezelState.osdMenuOpen = !this.bezelState.osdMenuOpen;
+        if (this.bezelState.osdMenuOpen) {
+          this.bezelState.flightLogsOpen = false;
+        }
+        break;
+      case 'osd-close':
+        this.bezelState.osdMenuOpen = false;
+        break;
+      case 'osd-crt-dec':
+        this.bezelState.crtIntensity = Math.max(0, Math.round((this.bezelState.crtIntensity - 0.1) * 100) / 100);
+        break;
+      case 'osd-crt-inc':
+        this.bezelState.crtIntensity = Math.min(1, Math.round((this.bezelState.crtIntensity + 0.1) * 100) / 100);
+        break;
+      case 'osd-crt-0':
+        this.bezelState.crtIntensity = 0.0;
+        break;
+      case 'osd-crt-25':
+        this.bezelState.crtIntensity = 0.25;
+        break;
+      case 'osd-crt-50':
+        this.bezelState.crtIntensity = 0.5;
+        break;
+      case 'osd-crt-75':
+        this.bezelState.crtIntensity = 0.75;
+        break;
+      case 'osd-crt-100':
+        this.bezelState.crtIntensity = 1.0;
+        break;
+      case 'hud-logs-toggle':
+      case 'osd-open-logs':
+        this.bezelState.osdMenuOpen = false;
         this.bezelState.flightLogsOpen = !this.bezelState.flightLogsOpen;
         break;
-    }
-  }
-
-  private handleHudButtonClick(id: string): void {
-    switch (id) {
+      case 'logs-tab-campaign':
+        this.manifestTab = 'CAMPAIGN';
+        break;
+      case 'logs-tab-endless':
+        this.manifestTab = 'ENDLESS';
+        break;
       case 'logs-close':
         this.bezelState.flightLogsOpen = false;
         break;
@@ -454,7 +465,9 @@ export class GameController {
         this.advanceAfterTally();
         break;
       case 'breach-retry':
-        this.retryCurrentSector();
+        if (this.lives > 0) {
+          this.redeployAfterCrash();
+        }
         break;
       case 'breach-end':
         this.concludeMissionToManifest();
@@ -463,31 +476,102 @@ export class GameController {
         this.phase = 'FLIGHT';
         break;
       case 'pause-retry':
-        this.retryCurrentSector();
+        this.manualJettisonAndRedeploy();
         break;
       case 'pause-abort':
         this.concludeMissionToManifest();
         break;
       case 'complete-endless':
-        this.endlessMode = true;
-        this.endlessDepth = 1;
-        this.endlessSeed = (Date.now() & 0xffffffff) >>> 0;
-        this.loadSector(SectorGenerator.createEndlessSector(this.endlessDepth, this.endlessSeed));
+        this.startEndlessDeepSurvey();
         break;
       case 'complete-manifest':
         this.concludeMissionToManifest();
         break;
       case 'callsign-submit':
-        this.submitCallsign();
+        void this.submitCallsign();
+        break;
+      case 'callsign-skip':
+        this.phase = 'TITLE_MENU';
+        break;
+      case 'callsign-finish':
+        this.finishCallsignUplink();
         break;
     }
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
+    // 1. Block ALL game hotkeys while typing in CALLSIGN_ENTRY (when modals aren't covering it)
+    if (
+      this.phase === 'CALLSIGN_ENTRY' &&
+      !this.bezelState.osdMenuOpen &&
+      !this.bezelState.flightLogsOpen
+    ) {
+      if (
+        this.uplinkSubmitState === 'CONFIRMED' ||
+        this.uplinkSubmitState === 'OFFLINE_SAVED'
+      ) {
+        if (e.code === 'Enter' || e.code === 'Space' || e.code === 'Escape') {
+          this.audio.playButtonLatchLock();
+          this.finishCallsignUplink();
+        }
+        return;
+      }
+      if (this.uplinkSubmitState === 'TRANSMITTING') {
+        return;
+      }
+
+      if (e.code === 'Backspace') {
+        this.callsignDraft = this.callsignDraft.slice(0, -1);
+        this.audio.playSfx('ui_keyclick', { pitch: 0.9 });
+      } else if (e.code === 'Enter') {
+        this.audio.playButtonLatchLock();
+        void this.submitCallsign();
+      } else if (e.code === 'Escape') {
+        this.audio.playButtonLatchLock(0.9, 0.85);
+        this.phase = 'TITLE_MENU';
+      } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (this.callsignDraft.length < 16) {
+          this.callsignDraft += e.key.toUpperCase();
+          this.audio.playSfx('ui_keyclick', { pitch: 1.06 });
+        }
+      }
+      return;
+    }
+
+    if (this.phase !== 'BOOT' && e.code === 'Tab' && !e.repeat) {
+      this.audio.playButtonLatchLock(0.95, 0.9);
+      if (this.bezelState.flightLogsOpen) {
+        this.manifestTab = this.manifestTab === 'CAMPAIGN' ? 'ENDLESS' : 'CAMPAIGN';
+      } else {
+        this.bezelState.osdMenuOpen = !this.bezelState.osdMenuOpen;
+        if (this.bezelState.osdMenuOpen) {
+          this.bezelState.flightLogsOpen = false;
+        }
+      }
+      return;
+    }
+
+    if (this.bezelState.osdMenuOpen) {
+      if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space') {
+        this.audio.playButtonLatchLock(0.95, 0.9);
+        this.bezelState.osdMenuOpen = false;
+      } else if (e.code === 'ArrowLeft') {
+        this.audio.playSfx('ui_keyclick');
+        this.handleHudButtonClick('osd-crt-dec');
+      } else if (e.code === 'ArrowRight') {
+        this.audio.playSfx('ui_keyclick');
+        this.handleHudButtonClick('osd-crt-inc');
+      }
+      return;
+    }
+
     if (this.bezelState.flightLogsOpen) {
       if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space') {
         this.audio.playButtonLatchLock(0.95, 0.9);
         this.bezelState.flightLogsOpen = false;
+      } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+        this.audio.playSfx('ui_keyclick');
+        this.manifestTab = this.manifestTab === 'CAMPAIGN' ? 'ENDLESS' : 'CAMPAIGN';
       }
       return;
     }
@@ -560,7 +644,7 @@ export class GameController {
         }
       } else if (e.code === 'KeyR' && !e.repeat) {
         this.audio.playButtonLatchLock();
-        this.retryCurrentSector();
+        this.manualJettisonAndRedeploy();
       } else if (e.code === 'Escape' && !e.repeat) {
         this.audio.playButtonLatchLock(0.92, 0.85);
         this.menuCursor = 0;
@@ -573,21 +657,21 @@ export class GameController {
       if (e.code === 'Escape') {
         this.audio.playButtonLatchLock();
         this.phase = 'FLIGHT';
-      } else if (e.code === 'KeyR') {
+      } else if (e.code === 'KeyR' && !e.repeat) {
         this.audio.playButtonLatchLock();
-        this.retryCurrentSector();
+        this.manualJettisonAndRedeploy();
       } else if (e.code === 'KeyQ') {
         this.audio.playButtonLatchLock();
         this.concludeMissionToManifest();
       } else if (e.code === 'ArrowUp' || e.code === 'KeyW') {
-        this.menuCursor = (this.menuCursor + 2) % 3;
+        this.menuCursor = (this.menuCursor + 3) % 4;
         this.audio.playSfx('ui_keyclick');
       } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
-        this.menuCursor = (this.menuCursor + 1) % 3;
+        this.menuCursor = (this.menuCursor + 1) % 4;
         this.audio.playSfx('ui_keyclick');
       } else if (e.code === 'Enter' || e.code === 'Space') {
         this.audio.playButtonLatchLock();
-        const acts = ['pause-resume', 'pause-retry', 'pause-abort'];
+        const acts = ['pause-resume', 'pause-osd', 'pause-retry', 'pause-abort'];
         this.handleHudButtonClick(acts[this.menuCursor]);
       }
       return;
@@ -606,12 +690,20 @@ export class GameController {
     }
 
     if (this.phase === 'HULL_BREACH') {
-      if (e.code === 'KeyR' || e.code === 'Space' || e.code === 'Enter') {
-        this.audio.playButtonLatchLock();
-        this.retryCurrentSector();
-      } else if (e.code === 'KeyM' || e.code === 'Escape') {
-        this.audio.playButtonLatchLock();
-        this.concludeMissionToManifest();
+      if (this.lives <= 0) {
+        // 3rd death = GAME OVER (no free [R] retries!)
+        if (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') {
+          this.audio.playButtonLatchLock();
+          this.concludeMissionToManifest();
+        }
+      } else {
+        if (e.code === 'KeyR' || e.code === 'Space' || e.code === 'Enter') {
+          this.audio.playButtonLatchLock();
+          this.redeployAfterCrash();
+        } else if (e.code === 'KeyQ' || e.code === 'KeyM' || e.code === 'Escape') {
+          this.audio.playButtonLatchLock();
+          this.concludeMissionToManifest();
+        }
       }
       return;
     }
@@ -622,21 +714,6 @@ export class GameController {
         this.concludeMissionToManifest();
       }
       return;
-    }
-
-    if (this.phase === 'CALLSIGN_ENTRY') {
-      if (e.code === 'Backspace') {
-        this.callsignDraft = this.callsignDraft.slice(0, -1);
-        this.audio.playSfx('ui_keyclick', { pitch: 0.9 });
-      } else if (e.code === 'Enter') {
-        this.audio.playButtonLatchLock();
-        this.submitCallsign();
-      } else if (e.key.length === 1 && /^[a-zA-Z0-9_-]$/.test(e.key)) {
-        if (this.callsignDraft.length < 10) {
-          this.callsignDraft += e.key.toUpperCase();
-          this.audio.playSfx('ui_keyclick', { pitch: 1.08 });
-        }
-      }
     }
   }
 
@@ -659,28 +736,46 @@ export class GameController {
 
   private startCampaign(startSector: number): void {
     this.endlessMode = false;
+    this.isPracticeRun = startSector > 1;
+    this.manifestTab = 'CAMPAIGN';
+    this.lives = this.maxLives;
+    this.lifeLostFlashTimer = 0;
     this.gameEmergencyPulseAvailable = true;
     this.missionScore = 0;
     this.displayedScore = 0;
     this.dropStreak = 0;
+    this.highestSectorNum = startSector;
     this.accuracySamples = [];
+    this.scoreSubmittedForRun = false;
+    this.uplinkSubmitState = 'IDLE';
+    this.uplinkConfirmText = null;
     this.loadSector(SectorGenerator.createCampaignSector(startSector));
   }
 
   private startEndlessDeepSurvey(): void {
     this.endlessMode = true;
+    this.isPracticeRun = false;
+    this.manifestTab = 'ENDLESS';
+    this.lives = this.maxLives;
+    this.lifeLostFlashTimer = 0;
     this.gameEmergencyPulseAvailable = true;
     this.endlessDepth = 1;
     this.endlessSeed = (Date.now() & 0xffffffff) >>> 0;
     this.missionScore = 0;
     this.displayedScore = 0;
     this.dropStreak = 0;
+    this.highestSectorNum = 1;
     this.accuracySamples = [];
+    this.scoreSubmittedForRun = false;
+    this.uplinkSubmitState = 'IDLE';
+    this.uplinkConfirmText = null;
     this.loadSector(SectorGenerator.createEndlessSector(this.endlessDepth, this.endlessSeed));
   }
 
   private loadSector(sec: SectorConfig): void {
     this.sector = sec;
+    const secNumber = sec.endlessMode ? this.endlessDepth : sec.index;
+    this.highestSectorNum = Math.max(this.highestSectorNum, secNumber);
     this.highestSectorCode = sec.code;
     this.lander = this.physics.createInitialLander(sec);
     this.lander.emergencyPulseAvailable = this.gameEmergencyPulseAvailable;
@@ -694,6 +789,7 @@ export class GameController {
     this.motionPingTimer = 0;
     this.lastBreakdown = null;
     this.lastFailure = null;
+    this.touchdownSnapshot = null;
     this.phase = 'SECTOR_BRIEFING';
     this.audio.playScaryComputerTransition('dark');
     this.audio.playAlienComputerActivity(0.52);
@@ -705,8 +801,40 @@ export class GameController {
     this.audio.playScaryComputerTransition('engage');
   }
 
-  private retryCurrentSector(): void {
+  /**
+   * Redeploys the next reserve shuttle after a crash (crash already decremented `this.lives`).
+   * Preserves cumulative run score and progress.
+   */
+  private redeployAfterCrash(): void {
+    if (this.lives <= 0) {
+      this.concludeMissionToManifest();
+      return;
+    }
+    this.spawnFreshShuttleOnCurrentSector(
+      `${this.sector.code} // RESERVE SHUTTLE DEPLOYED (${this.lives} LEFT)`
+    );
+  }
+
+  /**
+   * Manual mid-flight `[R]` restart strictly costs 1 shuttle life (and is locked on final shuttle)
+   * so `[R]` can never grant infinite free retries.
+   */
+  private manualJettisonAndRedeploy(): void {
+    if (this.lives <= 1) {
+      this.audio.playButtonLatchLock(0.7, 0.7);
+      this.showStatusToast('FINAL SHUTTLE ACTIVE — MANUAL JETTISON LOCKED', 2.0);
+      return;
+    }
+    this.lives -= 1;
+    this.lifeLostFlashTimer = 1.8;
     this.dropStreak = 0;
+    this.logEvent(`MANUAL JETTISON ON ${this.sector.code} // ${this.lives} SHUTTLES REMAINING`);
+    this.spawnFreshShuttleOnCurrentSector(
+      `SHUTTLE JETTISONED (-1 HULL) // ${this.lives} REMAINING`
+    );
+  }
+
+  private spawnFreshShuttleOnCurrentSector(toastMsg: string): void {
     const fresh = this.sector.endlessMode
       ? SectorGenerator.createEndlessSector(this.endlessDepth, this.endlessSeed)
       : SectorGenerator.createCampaignSector(this.sector.index);
@@ -719,15 +847,59 @@ export class GameController {
     this.hadActiveAvionicsWarning = false;
     this.motionPingTimer = 0;
     this.lastFailure = null;
+    this.touchdownSnapshot = null;
     this.glitchIntensity = 0.25;
     this.phase = 'FLIGHT';
     this.audio.playScaryComputerTransition('engage');
-    this.showStatusToast(`${fresh.code} // ORBITAL RE-INSERTION`, 1.8);
-    this.logEvent(`QUICK-RETRY EXECUTED ON ${fresh.code}`);
+    this.showStatusToast(toastMsg, 2.0);
+  }
+
+  private captureTouchdownSnapshot(
+    explicitPad: LandingPad | null,
+    vs: number,
+    hs: number,
+    deg: number,
+    grade: LandingGrade
+  ): void {
+    let pad = explicitPad;
+    let dist = 0;
+    if (!pad) {
+      let bestDist = Infinity;
+      for (const p of this.sector.pads) {
+        const cx = (p.x1 + p.x2) * 0.5;
+        const d = Math.hypot(
+          this.lander.pos.x - cx,
+          this.lander.pos.y + PHYSICS.STRUT_REST_BOTTOM_Y - p.y
+        );
+        if (d < bestDist) {
+          bestDist = d;
+          pad = p;
+        }
+      }
+      dist = bestDist;
+    }
+    if (!pad) return;
+    const padCenter = (pad.x1 + pad.x2) * 0.5;
+    this.touchdownSnapshot = {
+      pad,
+      dist,
+      vs,
+      hs,
+      deg,
+      offsetM: this.lander.pos.x - padCenter,
+      grade,
+    };
   }
 
   private handleTouchdown(evalResult: LandingEvaluation): void {
     const pad = evalResult.pad!;
+    this.captureTouchdownSnapshot(
+      pad,
+      evalResult.impactVs,
+      evalResult.impactHs,
+      evalResult.impactDeg,
+      evalResult.grade
+    );
     this.dropStreak += 1;
 
     // Scoring Formula per Sector:
@@ -803,10 +975,11 @@ export class GameController {
 
     this.tallyAnimProgress = 0;
     this.phase = 'SECTOR_TALLY';
-    if (evalResult.grade !== 'HARD_SURVIVAL') {
-      this.audio.playSfx('landing_soft_mech', { pitch: 0.96, volume: 0.95 });
-    }
-    this.audio.playScaryComputerTransition('confirm');
+    this.audio.playIndustrialTouchdownThud(
+      evalResult.impactVs,
+      evalResult.grade === 'HARD_SURVIVAL'
+    );
+    this.audio.playScaryComputerTransition('confirm', 0.48, 0.48);
     this.logEvent(
       `${this.sector.code} EXTRACTED [${pad.label} ${padMultiplier}X] // +${sectorTotal.toLocaleString()} PTS`
     );
@@ -826,47 +999,129 @@ export class GameController {
     }
   }
 
+  private getAverageAccuracy(): { percent: number; rating: string } {
+    const percent =
+      this.accuracySamples.length > 0
+        ? Math.round(
+            this.accuracySamples.reduce((a, b) => a + b, 0) / this.accuracySamples.length
+          )
+        : 0;
+    return { percent, rating: accuracyToGrade(percent) };
+  }
+
   private concludeMissionToManifest(): void {
-    if (this.missionScore > 0 && this.manifest.qualifiesForManifest(this.missionScore)) {
+    this.manifestTab = this.endlessMode ? 'ENDLESS' : 'CAMPAIGN';
+    if (this.missionScore > 0 && !this.isPracticeRun && !this.scoreSubmittedForRun) {
+      const saved = this.leaderboard.getSavedCallsign();
+      if (saved) {
+        this.callsignDraft = saved;
+      } else if (!this.callsignDraft.trim()) {
+        this.callsignDraft = 'PILOT-01';
+      }
+      this.uplinkSubmitState = 'IDLE';
+      this.uplinkConfirmText = null;
       this.phase = 'CALLSIGN_ENTRY';
     } else {
       this.phase = 'TITLE_MENU';
     }
   }
 
-  private submitCallsign(): void {
-    const avgAcc =
-      this.accuracySamples.length > 0
-        ? Math.round(
-            this.accuracySamples.reduce((a, b) => a + b, 0) / this.accuracySamples.length
-          )
-        : 75;
-    const rating = avgAcc >= 93 ? 'S+' : avgAcc >= 84 ? 'A' : avgAcc >= 72 ? 'B' : 'C';
+  private async submitCallsign(): Promise<void> {
+    if (this.scoreSubmittedForRun || this.uplinkSubmitState === 'TRANSMITTING') {
+      return;
+    }
+    const trimmed = this.callsignDraft.trim().slice(0, 16).toUpperCase() || 'PILOT-01';
+    this.callsignDraft = trimmed;
+    this.uplinkSubmitState = 'TRANSMITTING';
+    this.scoreSubmittedForRun = true;
 
-    this.manifest.recordFlight({
-      callsign: this.callsignDraft || 'PILOT-01',
+    const avg = this.getAverageAccuracy();
+    const mode: LeaderboardMode = this.endlessMode ? 'ENDLESS' : 'CAMPAIGN';
+    const result = await this.leaderboard.submitScore({
+      callsign: trimmed,
       score: this.missionScore,
-      highestSector: this.highestSectorCode,
-      accuracyRating: rating,
-      accuracyPercent: avgAcc,
-      mode: this.endlessMode ? 'DEEP-SURVEY' : 'CAMPAIGN',
+      sector: this.highestSectorNum,
+      mode,
+      accuracy: avg.percent,
     });
 
-    this.logEvent(`MANIFEST LOGGED: ${this.callsignDraft || 'PILOT-01'} (${Math.round(this.missionScore)} PTS)`);
+    const rankStr = `#${String(result.rank).padStart(2, '0')}`;
+    if (result.ok) {
+      this.uplinkSubmitState = 'CONFIRMED';
+      this.uplinkConfirmText = `UPLINK CONFIRMED // ${mode} RANK ${rankStr}`;
+      this.audio.playScaryComputerTransition('confirm', 0, 0.55);
+      this.logEvent(`GLOBAL UPLINK CONFIRMED: ${trimmed} [${mode} ${rankStr}]`);
+    } else {
+      this.uplinkSubmitState = 'OFFLINE_SAVED';
+      this.uplinkConfirmText = `RELAY OFFLINE // LOGGED TO LOCAL ARCHIVE (${rankStr})`;
+      this.logEvent(`LOCAL ARCHIVE LOGGED: ${trimmed} (${Math.round(this.missionScore)} PTS)`);
+    }
+  }
+
+  private finishCallsignUplink(): void {
+    this.manifestTab = this.endlessMode ? 'ENDLESS' : 'CAMPAIGN';
     this.phase = 'TITLE_MENU';
     this.bezelState.flightLogsOpen = true;
   }
 
-  private computeEffectiveEmInterference(): number {
-    let em = this.sector.emInterference;
-    if (this.sector.emBlackoutPulse) {
-      // Sector 06 periodic EM sensor blackout surges every ~9 seconds
-      const wave = Math.sin(this.totalTimeSec * 0.72);
-      if (wave > 0.45) {
-        em = Math.min(0.95, em + ((wave - 0.45) / 0.55) * 0.52);
-      }
+  /**
+   * Intermittent, non-fatiguing Electromagnetic Ion Blackout Surges:
+   * Keeps the CRT screen calm ~90% of the time (only a brief 0.85s analog sync ripple on surge onset),
+   * while plunging passive terrain optics into clean darkness during 8s blackout windows so the
+   * pilot must rely on [Left-Click] Radar Sweeps!
+   */
+  private computeEmStormState(): {
+    worldInterference: number;
+    shaderInterference: number;
+    blackoutActive: boolean;
+  } {
+    if (this.sector.emInterference < 0.3 && !this.sector.emBlackoutPulse) {
+      return {
+        worldInterference: this.sector.emInterference,
+        shaderInterference: 0.012,
+        blackoutActive: false,
+      };
     }
-    return em;
+
+    if (this.phase !== 'FLIGHT' && this.phase !== 'PAUSED') {
+      return {
+        worldInterference: 0.25,
+        shaderInterference: 0.02,
+        blackoutActive: false,
+      };
+    }
+
+    // Give 4.5s of initial visual orientation on drop, then 8.0s blackout / 6.5s clear cycle
+    if (this.sectorElapsedSec < 4.5) {
+      return {
+        worldInterference: 0.18,
+        shaderInterference: 0.015,
+        blackoutActive: false,
+      };
+    }
+
+    const cycleT = (this.sectorElapsedSec - 4.5) % 14.5;
+    const blackoutDuration = 8.0;
+    if (cycleT < blackoutDuration) {
+      // Brief subtle CRT ripple only on the 0.85s entry & 0.55s exit edges; calm screen in between!
+      let ripple = 0.024;
+      if (cycleT < 0.85) {
+        ripple = 0.024 + Math.sin((cycleT / 0.85) * Math.PI) * 0.23;
+      } else if (cycleT > blackoutDuration - 0.55) {
+        ripple = 0.024 + Math.sin(((blackoutDuration - cycleT) / 0.55) * Math.PI) * 0.15;
+      }
+      return {
+        worldInterference: 1.0,
+        shaderInterference: ripple,
+        blackoutActive: true,
+      };
+    }
+
+    return {
+      worldInterference: 0.12,
+      shaderInterference: 0.012,
+      blackoutActive: false,
+    };
   }
 
   private buildCameraView(): CameraView {
@@ -897,9 +1152,11 @@ export class GameController {
     if (this.proximityVoiceCooldown > 0) this.proximityVoiceCooldown = Math.max(0, this.proximityVoiceCooldown - dt);
     if (this.bankAngleVoiceCooldown > 0) this.bankAngleVoiceCooldown = Math.max(0, this.bankAngleVoiceCooldown - dt);
     if (this.driftVoiceCooldown > 0) this.driftVoiceCooldown = Math.max(0, this.driftVoiceCooldown - dt);
+    if (this.lifeLostFlashTimer > 0) this.lifeLostFlashTimer = Math.max(0, this.lifeLostFlashTimer - dt);
     if (this.glitchIntensity > 0) this.glitchIntensity = Math.max(0, this.glitchIntensity - dt * 1.45);
 
-    if (this.phase === 'FLIGHT' && this.lander.alive && !this.bezelState.flightLogsOpen) {
+    const modalPaused = this.bezelState.flightLogsOpen || this.bezelState.osdMenuOpen;
+    if (this.phase === 'FLIGHT' && this.lander.alive && !modalPaused) {
       this.sectorElapsedSec += dt;
     }
 
@@ -970,9 +1227,10 @@ export class GameController {
     }
 
     // Fixed-Timestep 60Hz Physics Simulation during active flight or breakup aftermath
+    const emStorm = this.computeEmStormState();
     const simActive =
       (this.phase === 'FLIGHT' || this.phase === 'HULL_BREACH' || this.phase === 'SECTOR_TALLY') &&
-      !this.bezelState.flightLogsOpen;
+      !modalPaused;
 
     let interpAlpha = 1;
     if (simActive) {
@@ -1011,20 +1269,33 @@ export class GameController {
             onTouchdownConfirmed: (ev) => this.handleTouchdown(ev),
             onHardImpactGlitch: (intensity, reason) => {
               this.glitchIntensity = Math.max(this.glitchIntensity, intensity);
-              this.audio.playSfx('landing_hard_thud', { pitch: 0.96, volume: 1.0 });
+              this.audio.playIndustrialTouchdownThud(3.0, true);
               this.showStatusToast(reason, 2.8);
             },
             onStrutContactThud: (intensity) => {
-              this.audio.playSfx('landing_soft_mech', { pitch: 1.0, volume: Math.max(0.65, intensity) });
+              this.audio.playIndustrialTouchdownThud(intensity * 2.0, false);
             },
             onCatastrophicBreach: (ev) => {
               this.lastFailure = ev;
+              this.captureTouchdownSnapshot(
+                ev.pad,
+                ev.impactVs,
+                ev.impactHs,
+                ev.impactDeg,
+                'CATASTROPHIC'
+              );
+              this.lives = Math.max(0, this.lives - 1);
+              this.lifeLostFlashTimer = 2.4;
               this.dropStreak = 0;
               this.glitchIntensity = 1.0;
               this.phase = 'HULL_BREACH';
               this.audio.playSfx('hull_explosion', { pitch: 0.96, volume: 1.0 });
               this.audio.playScaryComputerTransition('dark');
-              this.logEvent(`HULL BREACH ON ${this.sector.code}: ${ev.reason}`);
+              this.logEvent(
+                this.lives > 0
+                  ? `HULL BREACH ON ${this.sector.code} // ${this.lives} SHUTTLE(S) REMAINING`
+                  : `GAME OVER ON ${this.sector.code} // ALL 3 SHUTTLES LOST`
+              );
             },
           }
         );
@@ -1047,11 +1318,14 @@ export class GameController {
         }
 
         // 2. Muted Flight-Deck Indicator Beep whenever Bottom Airbus Warnings are Indicating
-        const activeAvionicsWarnings = HudRenderer.computeAvionicsWarnings(this.lander);
+        const activeAvionicsWarnings = HudRenderer.computeAvionicsWarnings(
+          this.lander,
+          emStorm.blackoutActive
+        );
         if (this.avionicsBeepTimer > 0) {
           this.avionicsBeepTimer = Math.max(0, this.avionicsBeepTimer - dt);
         }
-        if (activeAvionicsWarnings.length > 0 && !this.bezelState.flightLogsOpen) {
+        if (activeAvionicsWarnings.length > 0 && !modalPaused) {
           const hasCritical = activeAvionicsWarnings.some((w) => w.critical);
           if (!this.hadActiveAvionicsWarning && this.avionicsBeepTimer <= 0) {
             this.audio.playMutedAvionicsIndicatorBeep(hasCritical);
@@ -1123,7 +1397,7 @@ export class GameController {
       rcsDir,
       rcsInt,
       windSpd,
-      this.phase === 'FLIGHT' && this.lander.alive && !this.bezelState.flightLogsOpen,
+      this.phase === 'FLIGHT' && this.lander.alive && !modalPaused,
       this.sector.darknessLevel
     );
 
@@ -1138,7 +1412,6 @@ export class GameController {
     oCtx.scale(this.dpr, this.dpr);
 
     const cam = this.buildCameraView();
-    const effectiveEm = this.computeEffectiveEmInterference();
 
     if (this.phase !== 'BOOT') {
       this.worldRenderer.render(
@@ -1149,12 +1422,15 @@ export class GameController {
         this.physics,
         interpAlpha,
         this.totalTimeSec,
-        effectiveEm,
-        this.phase === 'FLIGHT' && !this.bezelState.flightLogsOpen && this.pointerInsideCrt
+        emStorm.worldInterference,
+        this.phase === 'FLIGHT' && !modalPaused && this.pointerInsideCrt
           ? this.cursorWorld
           : null
       );
     }
+
+    const avgAcc = this.getAverageAccuracy();
+    const manifestView = this.leaderboard.getManifestEntries(this.manifestTab);
 
     this.hudRenderer.render(oCtx, {
       phase: this.phase,
@@ -1169,6 +1445,14 @@ export class GameController {
       missionScore: this.missionScore,
       displayedScore: this.displayedScore,
       dropStreak: this.dropStreak,
+      lives: this.lives,
+      maxLives: this.maxLives,
+      lifeLostFlashTimer: this.lifeLostFlashTimer,
+      isPracticeRun: this.isPracticeRun,
+      endlessMode: this.endlessMode,
+      highestSectorCode: this.highestSectorCode,
+      avgAccuracyPercent: avgAcc.percent,
+      avgAccuracyRating: avgAcc.rating,
       selectedStartSector: this.selectedStartSector,
       menuCursor: this.menuCursor,
       bootPoweredOn: this.bootPoweredOn,
@@ -1178,12 +1462,22 @@ export class GameController {
       tallyAnimProgress: this.tallyAnimProgress,
       lastBreakdown: this.lastBreakdown,
       lastFailure: this.lastFailure,
+      touchdownSnapshot: this.touchdownSnapshot,
+      emBlackoutActive: emStorm.blackoutActive,
       activeCalloutText: this.activeCalloutText,
       activeCalloutTimer: this.activeCalloutTimer,
       statusBannerText: this.statusBannerText,
       statusBannerTimer: this.statusBannerTimer,
       callsignDraft: this.callsignDraft,
-      manifestEntries: this.manifest.getEntries(),
+      playerSavedCallsign: this.leaderboard.getSavedCallsign(),
+      uplinkConnectionStatus: this.leaderboard.getStatus(),
+      campaignLeader: this.leaderboard.getReigningChampion('CAMPAIGN'),
+      endlessLeader: this.leaderboard.getReigningChampion('ENDLESS'),
+      manifestTab: this.manifestTab,
+      manifestEntries: manifestView.entries,
+      manifestShowingArchive: manifestView.showingArchiveFallback,
+      uplinkSubmitState: this.uplinkSubmitState,
+      uplinkConfirmText: this.uplinkConfirmText,
       sessionLogs: this.sessionLogs,
       hoveredButtonId: this.hoveredHudButtonId,
     });
@@ -1191,7 +1485,7 @@ export class GameController {
     oCtx.restore();
 
     // =====================================================================
-    // STAGE 2: WEBGL CURVED CRT GLASS POST-PROCESSING SHADER
+    // STAGE 2: FULL-SCREEN WEBGL CURVED CRT GLASS POST-PROCESSING SHADER
     // =====================================================================
     const overdriveAmt =
       this.phase === 'FLIGHT' && this.lander.alive
@@ -1201,8 +1495,6 @@ export class GameController {
             ? Math.max(0.35, (this.lander.throttle - 0.85) * 1.9)
             : Math.max(0, (this.lander.throttle - 0.82) * 0.85)
         : 0;
-    const shaderInterference =
-      this.phase === 'FLIGHT' || this.phase === 'SECTOR_BRIEFING' ? effectiveEm : 0.03;
 
     this.webglCrt.render(
       this.offscreenCrtCanvas,
@@ -1210,26 +1502,10 @@ export class GameController {
       this.dpr,
       this.totalTimeSec,
       this.bezelState.crtIntensity,
-      shaderInterference,
+      emStorm.shaderInterference,
       this.glitchIntensity,
       overdriveAmt
     );
-
-    // =====================================================================
-    // HARDWARE BEZEL VECTOR OVERLAY (Outside Curved CRT Glass)
-    // =====================================================================
-    this.bezelCtx.save();
-    this.bezelCtx.scale(this.dpr, this.dpr);
-    this.bezelUi.render(
-      this.bezelCtx,
-      this.viewportWidth,
-      this.viewportHeight,
-      this.crtRect,
-      this.bezelState,
-      this.audio.getBusActivityLevel(),
-      this.totalTimeSec
-    );
-    this.bezelCtx.restore();
   }
 
   private updateCamera(dt: number): void {

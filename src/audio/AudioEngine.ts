@@ -760,10 +760,114 @@ export class AudioEngine {
   }
 
   /**
+   * Definitive, weighty multi-ton industrial spaceship touchdown "THUD":
+   * Layers the HD heavy landing thud sample (+8dB sub-bass shelf), a phase-locked
+   * structural hull shock transient (118Hz -> 29Hz), and delayed hydraulic clamp lock (+80ms).
+   */
+  private lastTouchdownThudTime = -10;
+  public playIndustrialTouchdownThud(impactVs: number, isHard: boolean): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastTouchdownThudTime < 0.35) return;
+    this.lastTouchdownThudTime = now;
+
+    const ctx = this.ctx;
+    const velScale = Math.max(0.72, Math.min(1.15, 0.72 + impactVs / 3.8));
+
+    // 1. Primary HD Heavy Industrial Thud Sample (onset-trimmed + sub-bass boosted)
+    const thudBuf = this.buffers.get('landing_hard_thud');
+    if (thudBuf) {
+      const onset = this.bufferOnsets.get('landing_hard_thud') ?? 0;
+      const src = ctx.createBufferSource();
+      src.buffer = thudBuf;
+      src.playbackRate.value = isHard ? 0.86 : 0.93;
+
+      const subShelf = ctx.createBiquadFilter();
+      subShelf.type = 'lowshelf';
+      subShelf.frequency.value = 98;
+      subShelf.gain.value = 8.0;
+
+      const hullBody = ctx.createBiquadFilter();
+      hullBody.type = 'peaking';
+      hullBody.frequency.value = 175;
+      hullBody.Q.value = 1.1;
+      hullBody.gain.value = 4.2;
+
+      const g = ctx.createGain();
+      g.gain.setValueAtTime((isHard ? 1.0 : 0.88) * velScale, now);
+
+      src.connect(subShelf);
+      subShelf.connect(hullBody);
+      hullBody.connect(g);
+      g.connect(this.masterGain);
+      src.start(now, onset);
+    }
+
+    // 2. Phase-Locked Physical Multi-Ton Sub-Bass Hull Drop + Damped Steel Deck Slam
+    const subOsc = ctx.createOscillator();
+    const subGain = ctx.createGain();
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(isHard ? 128 : 112, now);
+    subOsc.frequency.exponentialRampToValueAtTime(28, now + 0.29);
+    subGain.gain.setValueAtTime(0.0001, now);
+    subGain.gain.linearRampToValueAtTime(0.68 * velScale, now + 0.006);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    subOsc.connect(subGain);
+    subGain.connect(this.masterGain);
+    subOsc.start(now);
+    subOsc.stop(now + 0.36);
+
+    const crunchLen = Math.floor(ctx.sampleRate * 0.14);
+    const crunchBuf = ctx.createBuffer(1, crunchLen, ctx.sampleRate);
+    const cd = crunchBuf.getChannelData(0);
+    for (let i = 0; i < crunchLen; i++) {
+      const env = Math.exp(-i / (ctx.sampleRate * 0.028));
+      cd[i] = (Math.random() * 2 - 1) * env;
+    }
+    const crunchSrc = ctx.createBufferSource();
+    crunchSrc.buffer = crunchBuf;
+    const crunchLp = ctx.createBiquadFilter();
+    crunchLp.type = 'lowpass';
+    crunchLp.frequency.value = isHard ? 520 : 380;
+    const crunchGain = this.createGainWithMaster(0.55 * velScale);
+    crunchSrc.connect(crunchLp);
+    crunchLp.connect(crunchGain);
+    crunchSrc.start(now);
+
+    // 3. Delayed (+80ms) Pneumatic Strut Compression & Magnetic Clamp Lock
+    const mechBuf = this.buffers.get('landing_soft_mech');
+    if (mechBuf) {
+      const onset = this.bufferOnsets.get('landing_soft_mech') ?? 0;
+      const mSrc = ctx.createBufferSource();
+      mSrc.buffer = mechBuf;
+      mSrc.playbackRate.value = 0.92;
+      const mGain = this.createGainWithMaster(0.66);
+      mSrc.connect(mGain);
+      mSrc.start(now + 0.08, onset);
+    }
+
+    const latchBuf = this.buffers.get('button_latch_lock');
+    if (latchBuf) {
+      const onset = this.bufferOnsets.get('button_latch_lock') ?? 0;
+      const lSrc = ctx.createBufferSource();
+      lSrc.buffer = latchBuf;
+      lSrc.playbackRate.value = 0.72;
+      const lGain = this.createGainWithMaster(0.72);
+      lSrc.connect(lGain);
+      lSrc.start(now + 0.095, onset);
+    }
+  }
+
+  /**
    * Scary, ominous 1979 computer transition sound effects replacing non-warning voice intros/transitions.
    */
-  public playScaryComputerTransition(kind: 'dark' | 'engage' | 'confirm'): void {
+  public playScaryComputerTransition(
+    kind: 'dark' | 'engage' | 'confirm',
+    delaySeconds = 0,
+    gainVal = 0.82
+  ): void {
     if (!this.ctx || !this.masterGain || this.muted) return;
+    const startAt = this.ctx.currentTime + Math.max(0, delaySeconds);
     const idMap: Record<'dark' | 'engage' | 'confirm', SfxId> = {
       dark: 'computer_transition_dark',
       engage: 'computer_sector_engage',
@@ -786,13 +890,13 @@ export class AudioEngine {
       sub.frequency.value = 110;
       sub.gain.value = 4.5;
 
-      const g = this.createGainWithMaster(0.82);
+      const g = this.createGainWithMaster(gainVal);
       src.connect(lp);
       lp.connect(sub);
       sub.connect(g);
-      src.start(this.ctx.currentTime, onset);
+      src.start(startAt, onset);
     } else {
-      this.synth1979MainframeCascade(this.ctx.currentTime, 6, 0.45);
+      this.synth1979MainframeCascade(startAt, 6, 0.45);
     }
   }
 

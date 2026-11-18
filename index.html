@@ -50,15 +50,12 @@
     <h1 class="sr-only">INTERFACE 2037 — Weyland-Yutani USCSS Nostromo Orbital Descent Console</h1>
     <div id="sr-telemetry-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
-    <!-- Stage 2: Full-screen / CRT viewport WebGL curved phosphor post-processor -->
+    <!-- Full-screen CRT viewport WebGL curved phosphor post-processor -->
     <canvas id="crt-webgl-canvas" aria-label="Nostromo CRT Vector Descent Monitor">
       USCSS Nostromo Descent Telemetry requires HTML5 Canvas and WebGL support.
     </canvas>
 
-    <!-- Tactile Hardware Bezel Canvas framing the recessed curved CRT monitor -->
-    <canvas id="bezel-ui-canvas" aria-hidden="true"></canvas>
-
-    <!-- Keyboard-accessible mirror buttons for hardware bezel switches (WCAG Audio & Control Parity) -->
+    <!-- Keyboard-accessible mirror buttons for console OSD switches (WCAG Audio & Control Parity) -->
     <nav class="sr-only" aria-label="Console Hardware Switches">
       <button type="button" id="a11y-sas-toggle">Toggle SAS Attitude Dampener</button>
       <button type="button" id="a11y-zoom-toggle">Toggle Auto-Zoom Approach</button>

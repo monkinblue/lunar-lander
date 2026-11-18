@@ -6,6 +6,13 @@ export default defineConfig({
     target: 'es2022',
     outDir: 'dist',
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          firebase: ['firebase/app', 'firebase/firestore'],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

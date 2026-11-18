@@ -97,8 +97,8 @@ void main() {
   float curveAmt = dial * 0.95;
   vec2 uv = warpUV(vUv, curveAmt);
 
-  float cornerR = 0.018 + dial * 0.052;
-  float mask = roundedTubeMask(uv, cornerR);
+  float cornerR = dial * 0.058;
+  float mask = cornerR > 0.001 ? roundedTubeMask(uv, cornerR) : 1.0;
   if (mask <= 0.001 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
     vec2 edgeDist = abs(vUv * 2.0 - 1.0);
     float rim = smoothstep(0.995, 0.92, max(edgeDist.x, edgeDist.y));
@@ -223,14 +223,14 @@ void main() {
   float snow = hash12(floor(gl_FragCoord.xy / max(1.0, uDpr)) + vec2(floor(uTime * 30.0) * 17.3, 9.1)) - 0.5;
   col += vec3(0.28, 0.72, 0.42) * snow * snowAmt;
 
-  // Subtle Curved Glass Corner Glare & Deep Inner Bezel Vignette
+  // Subtle Curved Glass Corner Glare & Deep Inner Bezel Vignette (scales cleanly from 0% flat to 100% tube)
   vec2 glarePos1 = tubeCentered - vec2(-0.34, 0.42);
-  float warmLampGlare = exp(-dot(glarePos1, glarePos1) * 5.8) * (0.026 + 0.034 * dial);
+  float warmLampGlare = exp(-dot(glarePos1, glarePos1) * 5.8) * (0.048 * dial);
   col += vec3(0.90, 0.78, 0.60) * warmLampGlare;
 
-  float vignette = clamp(1.0 - cornerR2 * (0.14 + 0.18 * dial), 0.40, 1.0);
-  float edgeShadow = smoothstep(0.0, 0.060, 1.0 - max(abs(tubeCentered.x), abs(tubeCentered.y)));
-  col *= vignette * mix(0.24, 1.0, edgeShadow);
+  float vignette = clamp(1.0 - cornerR2 * (0.06 + 0.24 * dial), 0.40, 1.0);
+  float edgeShadow = smoothstep(0.0, 0.055, 1.0 - max(abs(tubeCentered.x), abs(tubeCentered.y)));
+  col *= vignette * mix(1.0, mix(0.26, 1.0, edgeShadow), dial);
 
   gl_FragColor = vec4(col * mask, 1.0);
 }
