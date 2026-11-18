@@ -22,9 +22,9 @@ A desktop-first, retro-futuristic vector **Lunar Lander** simulation inspired by
 | :--- | :--- |
 | `W` or `Up Arrow` | **Main Descent Engine Throttle** (smooth turbopump spool-up/down inertia) |
 | `Shift` + `W` / `Up` | **Emergency Max Overdrive Burn** (`135%` thrust at higher propellant burn rate) |
-| `A` / `D` or `Left` / `Right` | **RCS Cold-Gas Attitude Thrusters** (rotate counter-clockwise / clockwise) |
+| `A` / `D` or `Left` / `Right` | **RCS Cold-Gas Attitude Thrusters** (high-authority roll speed with preserved rotational momentum) |
 | `S` or `Down Arrow` | **Retro-Stabilizer Assist** (damps spin, uprights attitude, and arrests lateral drift) |
-| `Spacebar` | **Omnidirectional LIDAR Sweep** (360° terrain radar pulse; illuminates rock for 4s) |
+| `Spacebar` | **One-Time Emergency Solid-Rocket Thrust Pulse** (single-use high-G pyrotechnic abort kick per sector) |
 | `R` | **Instant Sector Quick-Retry** |
 | `Esc` | **MU-TH-UR 6000 Command Interrupt / Pause Overlay** |
 
@@ -32,7 +32,7 @@ A desktop-first, retro-futuristic vector **Lunar Lander** simulation inspired by
 | Action | System Function |
 | :--- | :--- |
 | **Mouse Move (in CRT)** | Steers directional **Shuttle Nose Spotlight & Narrow-Beam Rangefinder** |
-| **Left-Click (in CRT)** | Fires a **Focused Directional LIDAR Ping** toward cursor (longer range, lower capacitor cost) |
+| **Left-Click (in CRT)** | Fires a **Directional Radar Sweep** toward cursor (**3 discrete cells** per sector) |
 | **Mouse Scroll Wheel** | Manual tactical camera zoom (`1.0x` Sector Macro Overview to `3.5x` Precision Approach) |
 | **Click / Drag Bezel** | Operates physical cockpit toggle switches and the **CRT Glass & Bloom** rotary dial |
 

@@ -89,6 +89,8 @@ export interface LanderState {
   sensorCapacitor: number; // 0 .. 100 (emergency cell backup progress when 0 charges remain)
   radarCharges: number;
   maxRadarCharges: number;
+  emergencyPulseAvailable: boolean;
+  emergencyPulseTimer: number;
   spotlightAngle: number; // world angle (atan2(dy, dx))
   spotlightRange: number;
   spotlightHit: Vec2 | null;
@@ -243,6 +245,10 @@ export type SfxId =
   | 'keypress_return'
   | 'ui_toggle_switch'
   | 'thruster_ignite'
+  | 'emergency_thrust_pulse'
+  | 'computer_transition_dark'
+  | 'computer_sector_engage'
+  | 'computer_touchdown_confirm'
   | 'lidar_ping'
   | 'alien_motion_ping'
   | 'proximity_klaxon'

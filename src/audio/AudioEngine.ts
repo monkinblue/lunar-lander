@@ -726,6 +726,83 @@ export class AudioEngine {
     ping.stop(now + 0.18);
   }
 
+  /**
+   * EPIC Solid-Rocket Emergency Thrust Pulse ([SPACEBAR]):
+   * Explosive pyrotechnic ignition + chest-shaking sub-bass rocket blast wave.
+   */
+  public playEmergencyThrustPulse(): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    const buf = this.buffers.get('emergency_thrust_pulse');
+    if (buf) {
+      const onset = this.bufferOnsets.get('emergency_thrust_pulse') ?? 0;
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.playbackRate.value = 0.92;
+
+      const subShelf = ctx.createBiquadFilter();
+      subShelf.type = 'lowshelf';
+      subShelf.frequency.value = 120;
+      subShelf.gain.value = 6.5;
+
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(1.0, now);
+
+      src.connect(subShelf);
+      subShelf.connect(g);
+      g.connect(this.masterGain);
+      src.start(now, onset);
+    } else {
+      this.synthHullExplosion(now, 0.85);
+    }
+  }
+
+  /**
+   * Scary, ominous 1979 computer transition sound effects replacing non-warning voice intros/transitions.
+   */
+  public playScaryComputerTransition(kind: 'dark' | 'engage' | 'confirm'): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    const idMap: Record<'dark' | 'engage' | 'confirm', SfxId> = {
+      dark: 'computer_transition_dark',
+      engage: 'computer_sector_engage',
+      confirm: 'computer_touchdown_confirm',
+    };
+    const id = idMap[kind];
+    const buf = this.buffers.get(id);
+    if (buf) {
+      const onset = this.bufferOnsets.get(id) ?? 0;
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.playbackRate.value = kind === 'dark' ? 0.88 : 0.92;
+
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 1850;
+
+      const sub = this.ctx.createBiquadFilter();
+      sub.type = 'lowshelf';
+      sub.frequency.value = 110;
+      sub.gain.value = 4.5;
+
+      const g = this.createGainWithMaster(0.82);
+      src.connect(lp);
+      lp.connect(sub);
+      sub.connect(g);
+      src.start(this.ctx.currentTime, onset);
+    } else {
+      this.synth1979MainframeCascade(this.ctx.currentTime, 6, 0.45);
+    }
+  }
+
+  private createGainWithMaster(val: number): GainNode {
+    const g = this.ctx!.createGain();
+    g.gain.value = val;
+    g.connect(this.masterGain!);
+    return g;
+  }
+
   public playButtonLatchLock(pitch = 0.94, volume = 0.95): void {
     if (!this.ctx || !this.masterGain || this.muted) return;
     if (this.buffers.has('button_latch_lock')) {
@@ -857,6 +934,14 @@ export class AudioEngine {
         break;
       case 'thruster_ignite':
         this.synthLandingThud(now, 0.7, volume * 0.6);
+        break;
+      case 'emergency_thrust_pulse':
+        this.synthHullExplosion(now, volume * 0.85);
+        break;
+      case 'computer_transition_dark':
+      case 'computer_sector_engage':
+      case 'computer_touchdown_confirm':
+        this.synth1979MainframeCascade(now, 6, volume * 0.45);
         break;
       case 'lidar_ping':
         this.synthLidarPing(now, pitch, pan, volume);

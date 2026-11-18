@@ -195,28 +195,28 @@ export class HudRenderer {
     const sector = state.sector;
 
     // ---------------------------------------------------------------------
-    // RIGHT INSTRUMENT CLUSTER: EXPANDED FLIGHT DATA + GOLDEN-ORANGE DIALS + GREEN VERNIER
+    // RIGHT INSTRUMENT CLUSTER (EVEN LARGER): FLIGHT DATA + 86PX DIALS + VERNIER
     // ---------------------------------------------------------------------
-    const clusterW = Math.min(276, Math.max(236, Math.round(w * 0.245)));
-    const rx = w - clusterW - 18;
-    const ry = 46;
-    const clusterH = Math.min(556, h - 62);
+    const clusterW = Math.min(324, Math.max(268, Math.round(w * 0.275)));
+    const rx = w - clusterW - 16;
+    const ry = 44;
+    const clusterH = Math.min(620, h - 58);
 
-    ctx.fillStyle = 'rgba(3, 8, 5, 0.86)';
+    ctx.fillStyle = 'rgba(3, 8, 5, 0.88)';
     ctx.fillRect(rx, ry, clusterW, clusterH);
-    this.drawCornerBrackets(ctx, rx, ry, clusterW, clusterH, 14, COLORS.GREEN_DIM, 2.2);
+    this.drawCornerBrackets(ctx, rx, ry, clusterW, clusterH, 16, COLORS.GREEN_DIM, 2.4);
 
     // 1. Expanded "FLIGHT DATA" Tabular Telemetry Block (7 Avionics Rows)
     ctx.textAlign = 'left';
-    ctx.font = 'bold 16px "Share Tech Mono", monospace';
+    ctx.font = 'bold 18px "Share Tech Mono", monospace';
     ctx.fillStyle = COLORS.GREEN_BRIGHT;
-    ctx.fillText('FLIGHT DATA', rx + 12, ry + 21);
+    ctx.fillText('FLIGHT DATA', rx + 14, ry + 24);
 
     ctx.strokeStyle = COLORS.GREEN_PRIMARY;
-    ctx.lineWidth = 2.0;
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
-    ctx.moveTo(rx + 12, ry + 27);
-    ctx.lineTo(rx + clusterW - 12, ry + 27);
+    ctx.moveTo(rx + 14, ry + 31);
+    ctx.lineTo(rx + clusterW - 14, ry + 31);
     ctx.stroke();
 
     const totalMass = lander.dryMassKg + lander.fuelKg;
@@ -289,24 +289,24 @@ export class HudRenderer {
       },
     ];
 
-    ctx.font = 'bold 12px "JetBrains Mono", monospace';
+    ctx.font = 'bold 13.5px "JetBrains Mono", monospace';
     dataRows.forEach((row, idx) => {
-      const ty = ry + 44 + idx * 17;
+      const ty = ry + 50 + idx * 19;
       ctx.textAlign = 'left';
       ctx.fillStyle = COLORS.GREEN_MID;
-      ctx.fillText(row.label, rx + 12, ty);
+      ctx.fillText(row.label, rx + 14, ty);
 
       ctx.textAlign = 'right';
       ctx.fillStyle = row.color;
-      ctx.fillText(row.val, rx + clusterW - 12, ty);
+      ctx.fillText(row.val, rx + clusterW - 14, ty);
     });
 
-    // 2. Scaled-Up Chunky Circular Golden-Orange Gauges + Stepped Vertical Green Vernier Scale
-    const gaugesTopY = ry + 168;
+    // 2. Larger Chunky Circular Golden-Orange Gauges + Stepped Vertical Green Vernier Scale
+    const gaugesTopY = ry + 184;
     const leftColCx = rx + Math.round(clusterW * 0.28);
     const rightColCx = rx + Math.round(clusterW * 0.74);
-    const dialR = Math.min(38, Math.max(30, Math.round((clusterH - 198) / 8.8)));
-    const rowStep = dialR * 2 + 34;
+    const dialR = Math.min(43, Math.max(33, Math.round((clusterH - 216) / 8.6)));
+    const rowStep = dialR * 2 + 36;
 
     // Gauge A: FUEL Circular Wedge Dial
     const fuelRatio = Math.max(0, Math.min(1, lander.fuelKg / Math.max(1, lander.maxFuelKg)));
@@ -394,14 +394,14 @@ export class HudRenderer {
     }
 
     // ---------------------------------------------------------------------
-    // EXPANDED LEFT TACTICAL STACK (LARGER TOP-LEFT HUD + ALWAYS-ON LANDING MAP):
-    // 1) LARGE MISSION SCORE + PROPULSION FLOW / DELTA-V + RADAR CELLS RACK
-    // 2) INERTIAL ATTITUDE GYRO + WIND COMPASS + ROLL RATE / SLOPE
-    // 3) ALWAYS-ON LANDING PAD TOPOGRAPHY & GLIDE-SLOPE MAPPING
+    // EVEN LARGER LEFT TACTICAL STACK:
+    // 1) GIANT MISSION SCORE + [SPACE] EMERGENCY PULSE + 3 RADAR PING CELLS
+    // 2) LARGER INERTIAL ATTITUDE GYRO + WIND COMPASS
+    // 3) EXPANDED 2D LANDING PAD TOPOGRAPHY & GLIDE-SLOPE MAP
     // ---------------------------------------------------------------------
-    const lx = 18;
-    const ly = 46;
-    const leftW = Math.min(268, Math.max(232, Math.round(w * 0.24)));
+    const lx = 16;
+    const ly = 44;
+    const leftW = Math.min(324, Math.max(268, Math.round(w * 0.275)));
 
     this.drawScoreAndRadarRack(
       ctx,
@@ -415,19 +415,19 @@ export class HudRenderer {
       state.timeSec
     );
 
-    const gyroY = ly + 158;
+    const gyroY = ly + 174;
     this.drawAttitudeAndWindPod(ctx, lx, gyroY, leftW, lander, sector, windKnots);
 
     if (targetPadInfo && lander.alive && (state.phase === 'FLIGHT' || state.phase === 'PAUSED')) {
-      const mapY = gyroY + 166;
-      const availH = h - mapY - 26;
+      const mapY = gyroY + 176;
+      const availH = h - mapY - 24;
       if (availH >= 150) {
         this.drawProximityApproachSubWindow(
           ctx,
           lx,
           mapY,
           leftW,
-          Math.min(198, availH),
+          Math.min(240, availH),
           sector,
           lander,
           targetPadInfo.pad,
@@ -462,43 +462,42 @@ export class HudRenderer {
     lander: LanderState,
     timeSec: number
   ): void {
-    const h = 148;
+    const h = 164;
     ctx.save();
-    ctx.fillStyle = 'rgba(3, 8, 5, 0.86)';
+    ctx.fillStyle = 'rgba(3, 8, 5, 0.88)';
     ctx.fillRect(x, y, w, h);
-    this.drawCornerBrackets(ctx, x, y, w, h, 14, COLORS.GREEN_DIM, 2.2);
+    this.drawCornerBrackets(ctx, x, y, w, h, 14, COLORS.GREEN_DIM, 2.4);
 
-    // Top Row: Large Prominent MISSION SCORE + STREAK Badge
+    // Top Row: Giant Prominent MISSION SCORE + STREAK Badge
     ctx.textAlign = 'left';
-    ctx.font = 'bold 12.5px "Share Tech Mono", monospace';
+    ctx.font = 'bold 13.5px "Share Tech Mono", monospace';
     ctx.fillStyle = COLORS.GREEN_MID;
-    ctx.fillText('MISSION TELEMETRY SCORE', x + 12, y + 20);
+    ctx.fillText('MISSION TELEMETRY SCORE', x + 14, y + 22);
 
     const streak = Math.max(1, dropStreak);
     ctx.textAlign = 'right';
-    ctx.font = 'bold 13px "Share Tech Mono", monospace';
+    ctx.font = 'bold 14px "Share Tech Mono", monospace';
     ctx.fillStyle = streak > 1 ? COLORS.AMBER_BRIGHT : COLORS.GREEN_PRIMARY;
-    ctx.fillText(`STREAK ${streak}X`, x + w - 12, y + 20);
+    ctx.fillText(`STREAK ${streak}X`, x + w - 14, y + 22);
 
-    // Big Bold 28px Nostromo Tabular Score Readout
+    // Big Bold 32px Nostromo Tabular Score Readout
     ctx.textAlign = 'left';
-    ctx.font = 'bold 28px "JetBrains Mono", monospace';
+    ctx.font = 'bold 32px "JetBrains Mono", monospace';
     ctx.fillStyle = COLORS.AMBER_BRIGHT;
     const scoreText = Math.round(displayedScore).toString().padStart(7, '0');
-    ctx.fillText(scoreText, x + 12, y + 51);
+    ctx.fillText(scoreText, x + 14, y + 56);
 
-    // Mission Elapsed Time (MET) + Live Fuel Flow / Remaining Delta-V Telemetry Strip
+    // Mission Elapsed Time (MET) + Delta-V / Flow
     const mins = Math.floor(sectorElapsedSec / 60);
     const secs = sectorElapsedSec % 60;
     const metStr = `MET ${String(mins).padStart(2, '0')}:${secs.toFixed(1).padStart(4, '0')}`;
     ctx.textAlign = 'right';
-    ctx.font = 'bold 11.5px "JetBrains Mono", monospace';
+    ctx.font = 'bold 12.5px "JetBrains Mono", monospace';
     ctx.fillStyle = COLORS.GREEN_PRIMARY;
-    ctx.fillText(metStr, x + w - 12, y + 48);
+    ctx.fillText(metStr, x + w - 14, y + 53);
 
-    // Rocket Equation Remaining Delta-V & Live Burn Flow Rate
     const totalMass = lander.dryMassKg + lander.fuelKg;
-    const vExhaust = PHYSICS.MAIN_THRUST_N / PHYSICS.MAIN_BURN_RATE_KG_S; // ~707 m/s Isp*g0
+    const vExhaust = PHYSICS.MAIN_THRUST_N / PHYSICS.MAIN_BURN_RATE_KG_S;
     const deltaV = vExhaust * Math.log(totalMass / lander.dryMassKg);
     const burnMult = lander.throttle > 1 ? PHYSICS.OVERDRIVE_BURN_PENALTY : 1;
     const flowKgS =
@@ -507,44 +506,87 @@ export class HudRenderer {
       (lander.rcsLeftActive || lander.rcsRightActive ? PHYSICS.RCS_BURN_RATE_KG_S : 0);
 
     ctx.textAlign = 'left';
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.font = 'bold 12px "JetBrains Mono", monospace';
     ctx.fillStyle = COLORS.GREEN_MID;
-    ctx.fillText(`ΔV ${deltaV.toFixed(0)} M/S`, x + 12, y + 70);
+    ctx.fillText(`ΔV ${deltaV.toFixed(0)} M/S`, x + 14, y + 77);
     ctx.textAlign = 'right';
     ctx.fillStyle = flowKgS > 9 ? COLORS.AMBER_CAUTION : COLORS.GREEN_PRIMARY;
-    ctx.fillText(`FLOW ${flowKgS.toFixed(1)} KG/S`, x + w - 12, y + 70);
+    ctx.fillText(`FLOW ${flowKgS.toFixed(1)} KG/S`, x + w - 14, y + 77);
 
     ctx.strokeStyle = COLORS.GREEN_DIM;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.6;
     ctx.beginPath();
-    ctx.moveTo(x + 12, y + 78);
-    ctx.lineTo(x + w - 12, y + 78);
+    ctx.moveTo(x + 14, y + 86);
+    ctx.lineTo(x + w - 14, y + 86);
     ctx.stroke();
 
-    // Bottom Section: Discrete On-Theme RADAR PING CELLS Cartridge Rack
+    // =====================================================================
+    // BOTTOM SPLIT RACK:
+    // LEFT: [SPACE] ONE-TIME EMERGENCY THRUST PULSE CARTRIDGE
+    // RIGHT: [L-CLICK] 3 TACTICAL RADAR PING CELLS
+    // =====================================================================
+    const splitX = x + Math.round(w * 0.52);
+
+    // 1. Left Box: [SPACE] EMERGENCY PULSE
+    const pulseArmed = lander.emergencyPulseAvailable;
+    const pulseFiring = lander.emergencyPulseTimer > 0;
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 12px "Share Tech Mono", monospace';
+    ctx.fillStyle = pulseFiring
+      ? '#FFFFFF'
+      : pulseArmed
+        ? COLORS.AMBER_BRIGHT
+        : COLORS.RED_KLAXON;
+    ctx.fillText('[SPACE] EMERG PULSE', x + 14, y + 104);
+
+    const pBoxX = x + 14;
+    const pBoxY = y + 112;
+    const pBoxW = splitX - pBoxX - 10;
+    const pBoxH = 38;
+
+    ctx.strokeStyle = pulseArmed || pulseFiring ? COLORS.AMBER_CAUTION : COLORS.RED_DIM;
+    ctx.lineWidth = 2.0;
+    ctx.strokeRect(pBoxX, pBoxY, pBoxW, pBoxH);
+
+    if (pulseArmed || pulseFiring) {
+      const glow = pulseFiring ? 0.9 : 0.25 + 0.12 * Math.sin(timeSec * 5);
+      ctx.fillStyle = `rgba(255, 140, 0, ${glow.toFixed(2)})`;
+      ctx.fillRect(pBoxX + 3, pBoxY + 3, pBoxW - 6, pBoxH - 6);
+    }
+
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 13px "JetBrains Mono", monospace';
+    ctx.fillStyle = pulseFiring
+      ? '#FFFFFF'
+      : pulseArmed
+        ? COLORS.AMBER_BRIGHT
+        : COLORS.RED_KLAXON;
+    ctx.fillText(
+      pulseFiring ? '>> FIRING <<' : pulseArmed ? 'ARMED [1/1]' : 'EXPENDED',
+      pBoxX + pBoxW * 0.5,
+      pBoxY + 24
+    );
+
+    // 2. Right Box: [L-CLICK] 3 RADAR PING CELLS
     const maxCells = Math.max(1, lander.maxRadarCharges);
     const remCells = lander.radarCharges;
-    const lowCells = remCells <= 2;
+    const lowCells = remCells <= 1;
 
     ctx.textAlign = 'left';
     ctx.font = 'bold 12px "Share Tech Mono", monospace';
     ctx.fillStyle = remCells === 0 ? COLORS.RED_KLAXON : lowCells ? COLORS.AMBER_CAUTION : COLORS.GREEN_PRIMARY;
-    ctx.fillText('RADAR PING CELLS', x + 12, y + 96);
+    ctx.fillText('RADAR [L-CLK]', splitX + 4, y + 104);
 
     ctx.textAlign = 'right';
-    ctx.font = 'bold 13px "JetBrains Mono", monospace';
-    ctx.fillText(
-      `${String(remCells).padStart(2, '0')}/${String(maxCells).padStart(2, '0')}`,
-      x + w - 12,
-      y + 96
-    );
+    ctx.font = 'bold 12.5px "JetBrains Mono", monospace';
+    ctx.fillText(`${remCells}/${maxCells}`, x + w - 14, y + 104);
 
-    const rackX = x + 12;
-    const rackW = w - 24;
-    const rackY = y + 104;
-    const cellGap = 4;
+    const rackX = splitX + 4;
+    const rackW = x + w - 14 - rackX;
+    const rackY = y + 112;
+    const cellGap = 6;
     const cellW = (rackW - cellGap * (maxCells - 1)) / maxCells;
-    const cellH = 30;
+    const cellH = 38;
 
     if (remCells > 0) {
       for (let c = 0; c < maxCells; c++) {
@@ -556,39 +598,35 @@ export class HudRenderer {
             ? COLORS.AMBER_BRIGHT
             : COLORS.GREEN_BRIGHT
           : COLORS.GREEN_DIM;
-        ctx.fillRect(cx + cellW * 0.25, rackY, cellW * 0.5, 3.5);
+        ctx.fillRect(cx + cellW * 0.25, rackY, cellW * 0.5, 4);
 
         ctx.strokeStyle = charged
           ? lowCells
             ? COLORS.AMBER_CAUTION
             : COLORS.GREEN_PRIMARY
           : COLORS.GREEN_DIM;
-        ctx.lineWidth = 1.7;
-        ctx.strokeRect(cx, rackY + 3.5, cellW, cellH - 3.5);
+        ctx.lineWidth = 2.0;
+        ctx.strokeRect(cx, rackY + 4, cellW, cellH - 4);
 
         if (charged) {
           ctx.fillStyle = lowCells ? COLORS.AMBER_CAUTION : COLORS.GREEN_PRIMARY;
-          ctx.fillRect(cx + 2, rackY + 5.5, Math.max(2, cellW - 4), cellH - 7.5);
+          ctx.fillRect(cx + 3, rackY + 7, Math.max(2, cellW - 6), cellH - 10);
         }
       }
     } else {
       const blink = Math.sin(timeSec * 10) > 0;
       ctx.strokeStyle = blink ? COLORS.RED_KLAXON : COLORS.AMBER_DIM;
       ctx.lineWidth = 1.8;
-      ctx.strokeRect(rackX, rackY + 4, rackW, 24);
+      ctx.strokeRect(rackX, rackY + 4, rackW, 34);
 
       const progW = ((rackW - 4) * lander.sensorCapacitor) / 100;
       ctx.fillStyle = COLORS.AMBER_CAUTION;
-      ctx.fillRect(rackX + 2, rackY + 6, progW, 20);
+      ctx.fillRect(rackX + 2, rackY + 6, progW, 30);
 
       ctx.textAlign = 'center';
-      ctx.font = 'bold 11.5px "JetBrains Mono", monospace';
+      ctx.font = 'bold 11px "JetBrains Mono", monospace';
       ctx.fillStyle = COLORS.GREEN_BRIGHT;
-      ctx.fillText(
-        `RESERVE CELL GEN ${Math.round(lander.sensorCapacitor)}%`,
-        x + w * 0.5,
-        rackY + 20
-      );
+      ctx.fillText(`GEN ${Math.round(lander.sensorCapacitor)}%`, rackX + rackW * 0.5, rackY + 25);
     }
 
     ctx.restore();
@@ -835,15 +873,15 @@ export class HudRenderer {
     sector: SectorConfig,
     windKnots: number
   ): void {
-    const h = 156;
+    const h = 166;
     ctx.save();
-    ctx.fillStyle = 'rgba(3, 8, 5, 0.84)';
+    ctx.fillStyle = 'rgba(3, 8, 5, 0.86)';
     ctx.fillRect(x, y, w, h);
-    this.drawCornerBrackets(ctx, x, y, w, h, 12, COLORS.GREEN_DIM, 2.2);
+    this.drawCornerBrackets(ctx, x, y, w, h, 14, COLORS.GREEN_DIM, 2.4);
 
     const gyroCx = x + w * 0.27;
-    const gyroCy = y + 58;
-    const gyroR = 37;
+    const gyroCy = y + 62;
+    const gyroR = 42;
     const pitchDeg = (lander.angle * 180) / Math.PI;
     const attSafe = Math.abs(pitchDeg) <= PHYSICS.SAFE_ANGLE_DEG;
 
@@ -882,8 +920,8 @@ export class HudRenderer {
     ctx.fillText(`ATT ${pitchDeg >= 0 ? '+' : ''}${pitchDeg.toFixed(1)}°`, gyroCx, gyroCy + gyroR + 16);
 
     const windCx = x + w * 0.73;
-    const windCy = y + 58;
-    const windR = 37;
+    const windCy = y + 62;
+    const windR = 42;
     const windCol = lander.inWindShear
       ? COLORS.RED_KLAXON
       : windKnots > 9
@@ -1135,23 +1173,19 @@ export class HudRenderer {
     const pulse = Math.sin(timeSec * 14) > -0.2;
     const alerts: Array<{ text: string; color: string }> = [];
 
-    if (lander.ceilingClearance < 12 && lander.vel.y > 0.3) {
+    if (lander.ceilingClearance < 8 && lander.vel.y > 1.4) {
       alerts.push({ text: 'OBSTACLE // CEILING', color: COLORS.RED_KLAXON });
     }
-    if (
-      ((lander.agl < 26 && lander.vel.y < -3.05) ||
-        (lander.agl < 13 && lander.vel.y < -2.45)) &&
-      lander.throttle < 0.85
-    ) {
+    if (lander.agl < 18 && lander.vel.y < -3.7 && lander.throttle < 0.8) {
       alerts.push({
-        text: lander.agl < 16 && lander.vel.y < -4.0 ? 'PULL UP' : 'DESCENT RATE',
+        text: lander.agl < 15 && lander.vel.y < -4.6 ? 'PULL UP' : 'DESCENT RATE',
         color: COLORS.RED_KLAXON,
       });
     }
-    if (lander.agl < 26 && Math.abs(lander.vel.x) > 1.75) {
+    if (lander.agl < 16 && Math.abs(lander.vel.x) > 2.6) {
       alerts.push({ text: 'LATERAL DRIFT', color: COLORS.AMBER_CAUTION });
     }
-    if (lander.agl < 75 && Math.abs((lander.angle * 180) / Math.PI) > 19.0) {
+    if (lander.agl < 36 && Math.abs((lander.angle * 180) / Math.PI) > 32.0) {
       alerts.push({ text: 'BANK ANGLE', color: COLORS.AMBER_CAUTION });
     }
     if (lander.inWindShear) {
@@ -1162,7 +1196,7 @@ export class HudRenderer {
     }
     if ((sector.darknessLevel > 0.7 || sector.emInterference > 0.45) && lander.radarCharges > 0) {
       alerts.push({
-        text: `[SPACE / L-CLICK] PING RADAR (${lander.radarCharges} LEFT)`,
+        text: `[LEFT-CLICK] PING RADAR (${lander.radarCharges} LEFT)`,
         color: COLORS.GREEN_PRIMARY,
       });
     }
@@ -1516,13 +1550,13 @@ export class HudRenderer {
     ctx.fillStyle = COLORS.GREEN_PRIMARY;
     const leftControls = [
       '[W / UP]       MAIN ENGINE (+SHIFT: MAX OVERDRIVE)',
-      '[A / D]        RCS ATTITUDE ROTATION THRUSTERS',
+      '[A / D]        FAST RCS ATTITUDE THRUSTERS',
       '[S / DOWN]     RETRO-STABILIZER ASSIST (DAMP DRIFT)',
-      '[SPACEBAR]     RADIAL SONAR SWEEP (COSTS 1 CELL)',
+      '[SPACEBAR]     1X EXTREME EMERGENCY THRUST PULSE',
     ];
     const rightControls = [
-      '[MOUSE AIM]    STEER NOSE HEADLIGHT',
-      '[LEFT-CLICK]   FOCUSED BEAM PING (COSTS 1 CELL)',
+      '[MOUSE AIM]    STEER NOSE HEADLIGHT & RADAR CONE',
+      '[LEFT-CLICK]   DIRECTIONAL RADAR SWEEP (3 CELLS)',
       '[SCROLL WHEEL] TACTICAL CAMERA ZOOM (1.0X–3.5X)',
       '[R / ESC]      QUICK-RETRY SECTOR // COMMAND MENU',
     ];

@@ -47,7 +47,7 @@ export class GameController {
   private bezelState: BezelState = {
     sasEnabled: true,
     autoZoomEnabled: true,
-    crtIntensity: 0.50,
+    crtIntensity: 0.0,
     audioMuted: false,
     flightLogsOpen: false,
   };
@@ -76,7 +76,7 @@ export class GameController {
   private bootPoweredOn = false;
   private crtWarmupProgress = 0;
   private bootProgressChars = 0;
-  private bootVoicePlayed = false;
+  private bootTransitionPlayed = false;
   private briefingProgressChars = 0;
   private ambientChirpTimer = 26.0;
   private activeCalloutText: string | null = null;
@@ -85,16 +85,11 @@ export class GameController {
   private statusBannerTimer = 0;
   private menuCursor = 0;
 
-  // Per-sector callout latches, motion tracker & thruster ignition edge
+  // Per-sector extreme Airbus GPWS cooldowns, motion tracker & thruster ignition edge
   private sectorElapsedSec = 0;
-  private warnedFuelLow = false;
-  private warnedWind = false;
-  private warnedInterference = false;
-  private calledMinimums = false;
   private proximityVoiceCooldown = 0;
   private bankAngleVoiceCooldown = 0;
   private driftVoiceCooldown = 0;
-  private windShearVoiceCooldown = 0;
   private motionPingTimer = 0;
   private wasMainEngineLit = false;
 
@@ -549,12 +544,15 @@ export class GameController {
 
     if (this.phase === 'FLIGHT') {
       if (e.code === 'Space' && !e.repeat) {
-        if (this.physics.triggerOmniLidar(this.lander)) {
-          this.audio.playButtonLatchLock(1.02, 0.6);
-          this.audio.playSfx('lidar_ping', { pitch: 0.86, volume: 1.0 });
+        if (this.physics.triggerEmergencyThrustPulse(this.lander)) {
+          this.audio.playButtonLatchLock(1.06, 0.72);
+          this.audio.playEmergencyThrustPulse();
+          this.glitchIntensity = Math.max(this.glitchIntensity, 0.55);
+          this.showStatusToast('!! EMERGENCY SOLID-ROCKET PULSE FIRED !!', 2.1);
+          this.logEvent(`EMERGENCY SOLID-ROCKET PULSE FIRED ON ${this.sector.code}`);
         } else {
           this.audio.playButtonLatchLock(0.72, 0.65);
-          this.showStatusToast('NO RADAR CELLS — RESERVE GEN CHARGING', 1.3);
+          this.showStatusToast('EMERGENCY PULSE EXPENDED', 1.3);
         }
       } else if (e.code === 'KeyR' && !e.repeat) {
         this.audio.playButtonLatchLock();
@@ -642,16 +640,14 @@ export class GameController {
     const totalBootChars = BOOT_LINES.reduce((acc, s) => acc + s.length, 0);
     if (this.bootProgressChars < totalBootChars) {
       this.bootProgressChars = totalBootChars;
-      if (!this.bootVoicePlayed) {
-        this.bootVoicePlayed = true;
-        this.triggerVoice('voice_boot', true);
+      if (!this.bootTransitionPlayed) {
+        this.bootTransitionPlayed = true;
+        this.audio.playScaryComputerTransition('dark');
       }
       return;
     }
-    if (!this.bootVoicePlayed) {
-      this.bootVoicePlayed = true;
-      this.triggerVoice('voice_boot', true);
-    }
+    this.bootTransitionPlayed = true;
+    this.audio.playScaryComputerTransition('dark');
     this.audio.playAlienComputerActivity(0.5);
     this.menuCursor = 0;
     this.phase = 'TITLE_MENU';
@@ -686,29 +682,18 @@ export class GameController {
     this.currentZoom = 1.12;
     this.sectorElapsedSec = 0;
     this.briefingProgressChars = 0;
-    this.warnedFuelLow = false;
-    this.warnedWind = false;
-    this.warnedInterference = false;
-    this.calledMinimums = false;
     this.motionPingTimer = 0;
     this.lastBreakdown = null;
     this.lastFailure = null;
     this.phase = 'SECTOR_BRIEFING';
+    this.audio.playScaryComputerTransition('dark');
     this.audio.playAlienComputerActivity(0.52);
     this.logEvent(`LOADED ${sec.code}: ${sec.name}`);
   }
 
   private beginSectorFlight(): void {
     this.phase = 'FLIGHT';
-
-    // Sector-entry environmental voice advisories
-    if (this.sector.emInterference >= 0.4 && !this.warnedInterference) {
-      this.warnedInterference = true;
-      this.triggerVoice('voice_interference');
-    } else if (this.sector.windBands.length > 0 && !this.warnedWind) {
-      this.warnedWind = true;
-      this.triggerVoice('voice_wind');
-    }
+    this.audio.playScaryComputerTransition('engage');
   }
 
   private retryCurrentSector(): void {
@@ -720,12 +705,11 @@ export class GameController {
     this.lander = this.physics.createInitialLander(fresh);
     this.cameraPos = { ...this.lander.pos };
     this.sectorElapsedSec = 0;
-    this.warnedFuelLow = false;
-    this.calledMinimums = false;
     this.motionPingTimer = 0;
     this.lastFailure = null;
     this.glitchIntensity = 0.25;
     this.phase = 'FLIGHT';
+    this.audio.playScaryComputerTransition('engage');
     this.showStatusToast(`${fresh.code} // ORBITAL RE-INSERTION`, 1.8);
     this.logEvent(`QUICK-RETRY EXECUTED ON ${fresh.code}`);
   }
@@ -810,7 +794,7 @@ export class GameController {
     if (evalResult.grade !== 'HARD_SURVIVAL') {
       this.audio.playSfx('landing_soft_mech', { pitch: 0.96, volume: 0.95 });
     }
-    this.triggerVoice('voice_touchdown', true);
+    this.audio.playScaryComputerTransition('confirm');
     this.logEvent(
       `${this.sector.code} EXTRACTED [${pad.label} ${padMultiplier}X] // +${sectorTotal.toLocaleString()} PTS`
     );
@@ -899,7 +883,6 @@ export class GameController {
     if (this.proximityVoiceCooldown > 0) this.proximityVoiceCooldown = Math.max(0, this.proximityVoiceCooldown - dt);
     if (this.bankAngleVoiceCooldown > 0) this.bankAngleVoiceCooldown = Math.max(0, this.bankAngleVoiceCooldown - dt);
     if (this.driftVoiceCooldown > 0) this.driftVoiceCooldown = Math.max(0, this.driftVoiceCooldown - dt);
-    if (this.windShearVoiceCooldown > 0) this.windShearVoiceCooldown = Math.max(0, this.windShearVoiceCooldown - dt);
     if (this.glitchIntensity > 0) this.glitchIntensity = Math.max(0, this.glitchIntensity - dt * 1.45);
 
     if (this.phase === 'FLIGHT' && this.lander.alive && !this.bezelState.flightLogsOpen) {
@@ -940,9 +923,9 @@ export class GameController {
         if (Math.floor(this.bootProgressChars / 155) > Math.floor(prev / 155)) {
           this.audio.playAlienComputerActivity(0.32);
         }
-        if (this.bootProgressChars >= totalBoot && !this.bootVoicePlayed) {
-          this.bootVoicePlayed = true;
-          this.triggerVoice('voice_boot', true);
+        if (this.bootProgressChars >= totalBoot && !this.bootTransitionPlayed) {
+          this.bootTransitionPlayed = true;
+          this.audio.playScaryComputerTransition('dark');
         }
       }
     } else if (this.phase === 'SECTOR_BRIEFING') {
@@ -1026,7 +1009,7 @@ export class GameController {
               this.glitchIntensity = 1.0;
               this.phase = 'HULL_BREACH';
               this.audio.playSfx('hull_explosion', { pitch: 0.96, volume: 1.0 });
-              this.triggerVoice('voice_hull_breach', true);
+              this.audio.playScaryComputerTransition('dark');
               this.logEvent(`HULL BREACH ON ${this.sector.code}: ${ev.reason}`);
             },
           }
@@ -1049,67 +1032,40 @@ export class GameController {
           this.motionPingTimer = 0.25;
         }
 
-        // 2. Propellant 25% Advisory
-        const fuelRatio = this.lander.fuelKg / Math.max(1, this.lander.maxFuelKg);
-        if (fuelRatio <= 0.25 && !this.warnedFuelLow) {
-          this.warnedFuelLow = true;
-          this.triggerVoice('voice_fuel_low');
-        } else if (fuelRatio > 0.4) {
-          this.warnedFuelLow = false;
-        }
-
-        // 3. Decision Height "Minimums" Callout (passing through 24m AGL near a pad)
-        if (!this.calledMinimums && this.lander.agl <= 24 && this.lander.agl >= 12 && this.lander.vel.y < -0.2) {
-          const overAnyPad = this.sector.pads.some(
-            (p) => Math.abs(this.lander.pos.x - (p.x1 + p.x2) * 0.5) < 42
-          );
-          if (overAnyPad) {
-            this.calledMinimums = true;
-            this.triggerVoice('voice_minimums');
-          }
-        } else if (this.lander.agl > 48) {
-          this.calledMinimums = false;
-        }
-
-        // 4. Calibrated Less-Sensitive Airbus GPWS Envelope Callouts
-        const criticalPullUp = this.lander.agl < 16 && this.lander.vel.y < -4.1;
-        const ceilingObstacle = this.lander.ceilingClearance < 11 && this.lander.vel.y > 0.6;
+        // 2. Extreme-Only Airbus GPWS Envelope Callouts (woman voice reserved strictly for severe emergencies)
+        const criticalPullUp = this.lander.agl < 14 && this.lander.vel.y < -4.6;
+        const ceilingObstacle = this.lander.ceilingClearance < 8 && this.lander.vel.y > 1.5;
         const sinkRateWarn =
-          ((this.lander.agl < 26 && this.lander.vel.y < -3.05) ||
-            (this.lander.agl < 13 && this.lander.vel.y < -2.45)) &&
-          this.lander.throttle < 0.85;
+          this.lander.agl < 17 && this.lander.vel.y < -3.75 && this.lander.throttle < 0.75;
         const lateralDriftWarn =
-          this.lander.agl < 26 && Math.abs(this.lander.vel.x) > 1.75;
+          this.lander.agl < 15 && Math.abs(this.lander.vel.x) > 2.65;
         const absPitchDeg = Math.abs((this.lander.angle * 180) / Math.PI);
         const bankAngleWarn =
-          (this.lander.agl < 75 && absPitchDeg > 19.0) || absPitchDeg > 34.0;
+          (this.lander.agl < 34 && absPitchDeg > 33.0) || absPitchDeg > 58.0;
 
         if (criticalPullUp) {
           this.audio.playSfx('proximity_klaxon', { pitch: 0.95, volume: 0.65 });
           if (this.proximityVoiceCooldown <= 0) {
-            this.proximityVoiceCooldown = 4.2;
+            this.proximityVoiceCooldown = 6.5;
             this.triggerVoice('voice_pull_up', true);
           }
         } else if (ceilingObstacle) {
           this.audio.playSfx('proximity_klaxon', { pitch: 1.05, volume: 0.6 });
           if (this.proximityVoiceCooldown <= 0) {
-            this.proximityVoiceCooldown = 4.5;
+            this.proximityVoiceCooldown = 6.5;
             this.triggerVoice('voice_obstacle', true);
           }
         } else if (sinkRateWarn) {
           if (this.proximityVoiceCooldown <= 0) {
-            this.proximityVoiceCooldown = 6.5;
+            this.proximityVoiceCooldown = 10.0;
             this.triggerVoice('voice_proximity');
           }
         } else if (lateralDriftWarn && this.driftVoiceCooldown <= 0) {
-          this.driftVoiceCooldown = 6.5;
+          this.driftVoiceCooldown = 10.0;
           this.triggerVoice('voice_lateral_drift');
         } else if (bankAngleWarn && this.bankAngleVoiceCooldown <= 0) {
-          this.bankAngleVoiceCooldown = 6.5;
+          this.bankAngleVoiceCooldown = 10.0;
           this.triggerVoice('voice_bank_angle');
-        } else if (this.lander.inWindShear && this.windShearVoiceCooldown <= 0) {
-          this.windShearVoiceCooldown = 15.0;
-          this.triggerVoice('voice_wind_shear_short');
         }
       }
     }
@@ -1205,9 +1161,11 @@ export class GameController {
     // =====================================================================
     const overdriveAmt =
       this.phase === 'FLIGHT' && this.lander.alive
-        ? this.lander.overdrive
-          ? Math.max(0.35, (this.lander.throttle - 0.85) * 1.9)
-          : Math.max(0, (this.lander.throttle - 0.82) * 0.85)
+        ? this.lander.emergencyPulseTimer > 0
+          ? 0.95
+          : this.lander.overdrive
+            ? Math.max(0.35, (this.lander.throttle - 0.85) * 1.9)
+            : Math.max(0, (this.lander.throttle - 0.82) * 0.85)
         : 0;
     const shaderInterference =
       this.phase === 'FLIGHT' || this.phase === 'SECTOR_BRIEFING' ? effectiveEm : 0.03;

@@ -83,11 +83,12 @@ export class WorldRenderer {
     this.drawParticles(ctx, cam, physics);
 
     // 9. Beefed-Up Skeletal Drop-Shuttle OR Breakup Debris + Shockwaves
+    this.drawShockwaves(ctx, cam, physics);
     if (lander.alive) {
       this.drawDropShuttle(ctx, cam, lander, renderPos, renderAngle, timeSec);
       this.drawFlightVelocityReticle(ctx, cam, sector, physics, lander, renderPos);
     } else {
-      this.drawDebrisAndShockwaves(ctx, cam, physics);
+      this.drawDebris(ctx, cam, physics);
     }
 
     // 10. Tactical Mouse Cursor Aim Reticle
@@ -892,26 +893,30 @@ export class WorldRenderer {
     ctx.lineTo(lx(0.9), ly(-0.48));
     ctx.stroke();
 
-    if (lander.throttle > 0.01 && lander.fuelKg > 0) {
+    if ((lander.throttle > 0.01 && lander.fuelKg > 0) || lander.emergencyPulseTimer > 0) {
       const flicker = 0.85 + 0.28 * Math.sin(timeSec * 68);
-      const plumeLen = (2.5 + lander.throttle * 6.2) * flicker;
-      const outerColor = lander.overdrive ? COLORS.RED_KLAXON : COLORS.AMBER_CAUTION;
-      const innerColor = lander.overdrive ? COLORS.AMBER_BRIGHT : COLORS.GREEN_BRIGHT;
+      const isPulse = lander.emergencyPulseTimer > 0;
+      const plumeLen = isPulse
+        ? (11.5 + lander.emergencyPulseTimer * 10) * flicker
+        : (2.5 + lander.throttle * 6.2) * flicker;
+      const outerColor = isPulse || lander.overdrive ? COLORS.RED_KLAXON : COLORS.AMBER_CAUTION;
+      const innerColor = isPulse ? '#FFF4D4' : lander.overdrive ? COLORS.AMBER_BRIGHT : COLORS.GREEN_BRIGHT;
+      const plumeHalfW = isPulse ? 1.55 : 0.96;
 
       ctx.strokeStyle = outerColor;
-      ctx.lineWidth = 2.8;
+      ctx.lineWidth = isPulse ? 3.8 : 2.8;
       ctx.beginPath();
-      ctx.moveTo(lx(-0.96), ly(-0.92));
+      ctx.moveTo(lx(-plumeHalfW), ly(-0.92));
       ctx.lineTo(lx(0), ly(-0.92 - plumeLen));
-      ctx.lineTo(lx(0.96), ly(-0.92));
+      ctx.lineTo(lx(plumeHalfW), ly(-0.92));
       ctx.stroke();
 
       ctx.strokeStyle = innerColor;
-      ctx.lineWidth = 2.0;
+      ctx.lineWidth = isPulse ? 2.8 : 2.0;
       ctx.beginPath();
-      ctx.moveTo(lx(-0.48), ly(-0.92));
-      ctx.lineTo(lx(0), ly(-0.92 - plumeLen * 0.6));
-      ctx.lineTo(lx(0.48), ly(-0.92));
+      ctx.moveTo(lx(-plumeHalfW * 0.52), ly(-0.92));
+      ctx.lineTo(lx(0), ly(-0.92 - plumeLen * 0.65));
+      ctx.lineTo(lx(plumeHalfW * 0.52), ly(-0.92));
       ctx.stroke();
     }
     ctx.restore();
@@ -1202,22 +1207,30 @@ export class WorldRenderer {
     ctx.restore();
   }
 
-  private drawDebrisAndShockwaves(
+  private drawShockwaves(
     ctx: CanvasRenderingContext2D,
     cam: CameraView,
     physics: PhysicsEngine
   ): void {
+    if (physics.shockwaves.length === 0) return;
     ctx.save();
-
     for (const ring of physics.shockwaves) {
       const c = this.worldToScreen(cam, ring.pos.x, ring.pos.y);
-      ctx.strokeStyle = `rgba(255, 59, 31, ${ring.alpha.toFixed(3)})`;
+      ctx.strokeStyle = `rgba(255, 140, 0, ${ring.alpha.toFixed(3)})`;
       ctx.lineWidth = 3.2;
       ctx.beginPath();
       ctx.arc(c.x, c.y, ring.radius * cam.pxPerMeter, 0, Math.PI * 2);
       ctx.stroke();
     }
+    ctx.restore();
+  }
 
+  private drawDebris(
+    ctx: CanvasRenderingContext2D,
+    cam: CameraView,
+    physics: PhysicsEngine
+  ): void {
+    ctx.save();
     for (const seg of physics.debris) {
       const c = this.worldToScreen(cam, seg.pos.x, seg.pos.y);
       const ca = Math.cos(seg.angle);

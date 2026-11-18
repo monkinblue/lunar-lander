@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "generatedAt": "2026-11-18T04:41:50.627Z",
+  "generatedAt": "2026-11-18T05:01:13.552Z",
   "voiceId": "Xb7hH8MSUJpSbSDYk0k2",
   "assets": {
     "ambient_crt_buzz": {
@@ -62,6 +62,26 @@
       "path": "/audio/thruster_ignite.mp3",
       "category": "sfx",
       "bytes": 23030
+    },
+    "emergency_thrust_pulse": {
+      "path": "/audio/emergency_thrust_pulse.mp3",
+      "category": "sfx",
+      "bytes": 48944
+    },
+    "computer_transition_dark": {
+      "path": "/audio/computer_transition_dark.mp3",
+      "category": "sfx",
+      "bytes": 39331
+    },
+    "computer_sector_engage": {
+      "path": "/audio/computer_sector_engage.mp3",
+      "category": "sfx",
+      "bytes": 33061
+    },
+    "computer_touchdown_confirm": {
+      "path": "/audio/computer_touchdown_confirm.mp3",
+      "category": "sfx",
+      "bytes": 39331
     },
     "button_latch_lock": {
       "path": "/audio/button_latch_lock.mp3",

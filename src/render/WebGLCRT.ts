@@ -93,10 +93,12 @@ float roundedTubeMask(vec2 uv, float cornerRadius) {
 
 void main() {
   float dial = clamp(uCrtIntensity, 0.0, 1.0);
-  float curveAmt = 0.24 + dial * 0.86;
+  // At 0% intensity dial, glass curvature is 0% (flat); scales smoothly up with dial
+  float curveAmt = dial * 0.95;
   vec2 uv = warpUV(vUv, curveAmt);
 
-  float mask = roundedTubeMask(uv, 0.064);
+  float cornerR = 0.018 + dial * 0.052;
+  float mask = roundedTubeMask(uv, cornerR);
   if (mask <= 0.001 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
     vec2 edgeDist = abs(vUv * 2.0 - 1.0);
     float rim = smoothstep(0.995, 0.92, max(edgeDist.x, edgeDist.y));
@@ -158,11 +160,11 @@ void main() {
   vec3 beamWithPersistence = liveC + ghostTail * trailTint * (0.68 + 0.32 * dial);
 
   // =========================================================================
-  // CONTROLLED TIGHT ANALOG HALATION / BLOOM
+  // FURTHER REDUCED, TIGHT SUB-PIXEL HALATION / BLOOM (0% at dial=0)
   // =========================================================================
   vec3 localHalo = vec3(0.0);
-  float rTight = (1.3 + dial * 1.3) * uDpr;
-  float rMid = (3.1 + dial * 2.5) * uDpr;
+  float rTight = (0.85 + dial * 0.85) * uDpr;
+  float rMid = (1.85 + dial * 1.45) * uDpr;
 
   localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2( rTight, 0.0) * texel, 0.001, 0.999)).rgb * 0.16;
   localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2(-rTight, 0.0) * texel, 0.001, 0.999)).rgb * 0.16;
@@ -174,7 +176,7 @@ void main() {
   localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2( rMid, -rMid) * 0.71 * texel, 0.001, 0.999)).rgb * 0.09;
   localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2(-rMid, -rMid) * 0.71 * texel, 0.001, 0.999)).rgb * 0.09;
 
-  vec3 bloomCol = max(localHalo - vec3(0.035), vec3(0.0)) * (0.24 + 0.34 * dial);
+  vec3 bloomCol = max(localHalo - vec3(0.055), vec3(0.0)) * (0.15 * dial);
   float bloomWarmth = smoothstep(0.03, 0.25, bloomCol.r - bloomCol.g * 0.65);
   vec3 bloomTint = mix(vec3(0.84, 1.00, 0.88), vec3(1.10, 0.80, 0.34), bloomWarmth);
 
@@ -436,7 +438,7 @@ export class WebGLCRT {
     }
 
     const dial = Math.max(0, Math.min(1, crtIntensity));
-    const amount = 0.24 + dial * 0.86;
+    const amount = dial * 0.95;
     let cx = rawU * 2.0 - 1.0;
     let cy = rawV * 2.0 - 1.0;
     const r2 = cx * cx + cy * cy;

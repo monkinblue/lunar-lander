@@ -298,7 +298,7 @@ export class SectorGenerator {
       emInterference: 0,
       emBlackoutPulse: false,
       dustDensity: 0.08,
-      initialRadarCharges: 8,
+      initialRadarCharges: 3,
       endlessMode: false,
     };
   }
@@ -373,7 +373,7 @@ export class SectorGenerator {
       emInterference: 0.05,
       emBlackoutPulse: false,
       dustDensity: 0.22,
-      initialRadarCharges: 8,
+      initialRadarCharges: 3,
       endlessMode: false,
     };
   }
@@ -465,7 +465,7 @@ export class SectorGenerator {
       emInterference: 0.12,
       emBlackoutPulse: false,
       dustDensity: 1.0,
-      initialRadarCharges: 8,
+      initialRadarCharges: 3,
       endlessMode: false,
     };
   }
@@ -528,8 +528,8 @@ export class SectorGenerator {
       subtitle: 'ENCLOSED OVERHEAD ROOF // ZERO AMBIENT ILLUMINATION',
       briefingLines: [
         'ENTERING PITCH-BLACK SUBSURFACE LAVA TUBE. FULL OVERHEAD CEILING.',
-        'PASSIVE OPTICS BLIND BEYOND HULL PERIMETER — ACTIVE RADAR MANDATORY.',
-        'EACH [SPACEBAR] OR [LEFT-CLICK] PING EXPENDS 1 SONAR SURVEY CELL.',
+        'PASSIVE OPTICS BLIND BEYOND HULL PERIMETER — AIM & [LEFT-CLICK] RADAR (3 CELLS).',
+        'RESERVE [SPACEBAR] FOR ONE-TIME SOLID-ROCKET EMERGENCY ABORT PULSE.',
         'DEEP DERELICT-CHAMBER EXTRACTION PAD CARRIES 6X HAZARD MULTIPLIER.',
       ],
       gravity: 1.95,
@@ -551,7 +551,7 @@ export class SectorGenerator {
       emInterference: 0.08,
       emBlackoutPulse: false,
       dustDensity: 0.35,
-      initialRadarCharges: 10,
+      initialRadarCharges: 3,
       endlessMode: false,
     };
   }
@@ -613,8 +613,8 @@ export class SectorGenerator {
       subtitle: 'HEAVY ION INTERFERENCE // ACTIVE LIDAR TERRAIN PING REQUIRED',
       briefingLines: [
         'WARNING: SEVERE IONOSPHERIC STORM MASKS PASSIVE TERRAIN TELEMETRY IN STATIC.',
-        'ENGAGE [SPACEBAR] OMNIDIRECTIONAL RADAR OR [LEFT-CLICK] DIRECTIONAL LIDAR.',
-        'ILLUMINATED PHOSPHOR WIREFRAMES DECAY OVER 4.0 SECONDS — MANAGE CAPACITOR.',
+        'AIM & [LEFT-CLICK] DIRECTIONAL LIDAR (3 CELLS) TO ILLUMINATE PATH.',
+        '[SPACEBAR] ARMS ONE-TIME EXTREME EMERGENCY THRUST PULSE FOR ABORT RECOVERY.',
         'STORM-DEPOT AVAILABLE AT X:228M; ION-TRENCH (5X) LIES BEYOND EASTERN SPIRE.',
       ],
       gravity: 2.2,
@@ -636,7 +636,7 @@ export class SectorGenerator {
       emInterference: 0.94,
       emBlackoutPulse: false,
       dustDensity: 0.72,
-      initialRadarCharges: 10,
+      initialRadarCharges: 3,
       endlessMode: false,
     };
   }
@@ -760,7 +760,7 @@ export class SectorGenerator {
       emInterference: 0.48,
       emBlackoutPulse: true,
       dustDensity: 0.85,
-      initialRadarCharges: 10,
+      initialRadarCharges: 3,
       endlessMode: false,
     };
   }
@@ -917,7 +917,7 @@ export class SectorGenerator {
       emInterference: hasEM ? 0.88 : 0.06,
       emBlackoutPulse: depthNumber >= 4 && hasEM,
       dustDensity: hasWind ? 0.85 : 0.25,
-      initialRadarCharges: hasCeiling || hasEM ? 10 : 8,
+      initialRadarCharges: 3,
       endlessMode: true,
     };
   }

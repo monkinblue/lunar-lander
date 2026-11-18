@@ -121,6 +121,8 @@ export class PhysicsEngine {
       sensorCapacitor: 100,
       radarCharges: sector.initialRadarCharges,
       maxRadarCharges: sector.initialRadarCharges,
+      emergencyPulseAvailable: true,
+      emergencyPulseTimer: 0,
       spotlightAngle: -Math.PI * 0.5,
       spotlightRange: PHYSICS.SPOTLIGHT_RANGE_M,
       spotlightHit: null,
@@ -156,6 +158,41 @@ export class PhysicsEngine {
         size: 0.7 + Math.random() * 1.3,
       });
     }
+  }
+
+  /**
+   * One-time-use Solid-Rocket Emergency Thrust Pulse ([SPACEBAR]):
+   * Fires an explosive pyrotechnic abort kick + 0.46s high-G solid-motor burn
+   * to arrest fatal descent rates or shear emergencies.
+   */
+  public triggerEmergencyThrustPulse(lander: LanderState): boolean {
+    if (!lander.alive || !lander.emergencyPulseAvailable || this.touchdownLocked) return false;
+    lander.emergencyPulseAvailable = false;
+    lander.emergencyPulseTimer = PHYSICS.EMERGENCY_PULSE_DURATION_S;
+    lander.throttle = PHYSICS.OVERDRIVE_MULTIPLIER;
+
+    // Lift off immediately if sitting on a depot pad
+    if (lander.groundedPad) {
+      lander.groundedPad = null;
+      lander.groundedTime = 0;
+      lander.refuelingActive = false;
+    }
+
+    const ax = Math.sin(lander.angle);
+    const ay = Math.cos(lander.angle);
+    lander.vel.x += ax * PHYSICS.EMERGENCY_PULSE_INSTANT_DV;
+    lander.vel.y += ay * PHYSICS.EMERGENCY_PULSE_INSTANT_DV;
+    lander.angularVel *= 0.25;
+
+    const nozzle = this.localToWorld(lander, 0, -2.35);
+    this.shockwaves.push({
+      pos: { ...nozzle },
+      radius: 1.2,
+      maxRadius: 34,
+      alpha: 0.95,
+    });
+    this.spawnSparks(nozzle, 28);
+    return true;
   }
 
   public triggerOmniLidar(lander: LanderState): boolean {
@@ -390,8 +427,21 @@ export class PhysicsEngine {
       lander.fuelKg = Math.max(0, lander.fuelKg - PHYSICS.RETRO_BURN_RATE_KG_S * dt);
     }
 
+    // Solid-Rocket Emergency Thrust Pulse ([SPACEBAR])
+    if (lander.emergencyPulseTimer > 0) {
+      lander.emergencyPulseTimer = Math.max(0, lander.emergencyPulseTimer - dt);
+      lander.overdrive = true;
+      lander.throttle = PHYSICS.OVERDRIVE_MULTIPLIER;
+      const pulseThrust = PHYSICS.EMERGENCY_PULSE_THRUST_N;
+      forceX += Math.sin(lander.angle) * pulseThrust;
+      forceY += Math.cos(lander.angle) * pulseThrust;
+      // Auto-damping gyro kick during emergency burn
+      torque += (-lander.angularVel * 8500 - lander.angle * 6500);
+      this.emitMainPlumeParticles(lander, sector);
+    }
+
     // Main Descent Engine Thrust + Propellant Burn
-    if (lander.throttle > 0.001 && hasFuel) {
+    if (lander.throttle > 0.001 && hasFuel && lander.emergencyPulseTimer <= 0) {
       const thrustMag = lander.throttle * PHYSICS.MAIN_THRUST_N;
       const thrustAngle = lander.angle + lander.gimbalAngle * 0.35;
       // angle > 0 is clockwise tilt right -> sin(angle) > 0 pushes +X (right), cos(angle) > 0 pushes +Y (up)
@@ -467,7 +517,7 @@ export class PhysicsEngine {
     lander.vel.y += (forceY / totalMass) * dt;
     lander.angularVel += (torque / momentOfInertia) * dt;
 
-    lander.angularVel = Math.max(-6.8, Math.min(6.8, lander.angularVel));
+    lander.angularVel = Math.max(-9.5, Math.min(9.5, lander.angularVel));
 
     lander.pos.x += lander.vel.x * dt;
     lander.pos.y += lander.vel.y * dt;
@@ -673,55 +723,25 @@ export class PhysicsEngine {
       this.firstContactPeakDeg = Math.max(this.firstContactPeakDeg, impactDeg);
     }
 
-    // Articulated Spring-Damper Compression Physics
-    const compL = Math.max(0, Math.min(1, penL / PHYSICS.STRUT_MAX_TRAVEL_M));
-    const compR = Math.max(0, Math.min(1, penR / PHYSICS.STRUT_MAX_TRAVEL_M));
+    // Instant Magnetic Pad Friction Stop & Zero Wind-Draft Delay Upon Landing!
+    const compL = Math.max(0.22, Math.min(1, penL / PHYSICS.STRUT_MAX_TRAVEL_M + 0.25));
+    const compR = Math.max(0.22, Math.min(1, penR / PHYSICS.STRUT_MAX_TRAVEL_M + 0.25));
     lander.strutCompressionL = compL + (lander.strutDamaged ? 0.18 : 0);
     lander.strutCompressionR = compR;
 
-    const totalMass = lander.dryMassKg + lander.fuelKg;
-    const maxPen = Math.max(0, Math.max(penL, penR));
+    const wantsClimb = lander.targetThrottle >= 0.25 || lander.emergencyPulseTimer > 0;
 
-    // Prevent bottoming out past max strut travel
-    if (maxPen > PHYSICS.STRUT_MAX_TRAVEL_M * 0.72) {
-      lander.pos.y += maxPen - PHYSICS.STRUT_MAX_TRAVEL_M * 0.72;
-      if (lander.vel.y < 0) lander.vel.y = 0;
-    }
-
-    // Upward spring + damper normal force
-    const avgPen = (Math.max(0, penL) + Math.max(0, penR)) * 0.5;
-    const springUpForce =
-      avgPen * PHYSICS.STRUT_SPRING_K - lander.vel.y * PHYSICS.STRUT_DAMPER_C;
-    if (springUpForce > 0 && lander.targetThrottle < 0.25) {
-      lander.vel.y += (springUpForce / totalMass) * dt;
-    }
-
-    // Pad footpad friction & self-leveling torque
-    if (lander.targetThrottle < 0.25) {
-      lander.vel.x *= Math.pow(0.015, dt);
-      if (Math.abs(lander.vel.x) < 0.04) lander.vel.x = 0;
-
-      const targetRestAngle = lander.strutDamaged ? -0.035 : 0;
-      lander.angle += (targetRestAngle - lander.angle) * Math.min(1, dt * 8);
-      lander.angularVel *= Math.pow(0.01, dt);
-      if (Math.abs(lander.vel.y) < 0.18 && avgPen > 0.02) {
-        lander.vel.y = 0;
-      }
-    }
-
-    // Check settled state
-    const settled =
-      lander.targetThrottle === 0 &&
-      Math.abs(lander.vel.x) < 0.12 &&
-      Math.abs(lander.vel.y) < 0.22 &&
-      Math.abs(lander.angle) < 0.14;
-
-    if (settled) {
+    if (!wantsClimb) {
+      // Lock onto pad immediately: friction & magnetic pad clamps bring craft to a dead stop at once
       lander.groundedPad = matchedPad;
+      lander.vel.x = 0;
+      lander.vel.y = 0;
+      lander.angularVel = 0;
+      lander.angle = lander.strutDamaged ? -0.035 : 0;
+      lander.pos.y = matchedPad.y - PHYSICS.STRUT_REST_BOTTOM_Y - 0.22;
       lander.groundedTime += dt;
 
       if (matchedPad.type === 'DEPOT') {
-        // Intermediate Refuel Depot Pad: pump propellant & repair subsystems while stationary!
         if (lander.fuelKg < lander.maxFuelKg - 0.05) {
           lander.refuelingActive = true;
           lander.fuelKg = Math.min(
@@ -731,18 +751,18 @@ export class PhysicsEngine {
         } else {
           lander.refuelingActive = false;
         }
-        // Gradual field maintenance & radar cell reload on depot
         if (lander.radarCharges < lander.maxRadarCharges) {
-          if (Math.floor(lander.groundedTime * 2) > Math.floor((lander.groundedTime - dt) * 2)) {
+          if (Math.floor(lander.groundedTime * 2.5) > Math.floor((lander.groundedTime - dt) * 2.5)) {
             lander.radarCharges = Math.min(lander.maxRadarCharges, lander.radarCharges + 1);
           }
         }
-        if (lander.groundedTime > 1.2) {
+        if (lander.groundedTime > 0.8) {
+          lander.emergencyPulseAvailable = true;
           lander.strutDamaged = false;
           lander.rcsDamaged = false;
-          lander.hullIntegrity = Math.min(100, lander.hullIntegrity + 12 * dt);
+          lander.hullIntegrity = Math.min(100, lander.hullIntegrity + 16 * dt);
         }
-      } else if (matchedPad.type === 'EXTRACTION' && !this.touchdownLocked && lander.groundedTime >= 0.38) {
+      } else if (matchedPad.type === 'EXTRACTION' && !this.touchdownLocked && lander.groundedTime >= 0.04) {
         this.touchdownLocked = true;
         lander.throttle = 0;
         const padCenter = (matchedPad.x1 + matchedPad.x2) * 0.5;

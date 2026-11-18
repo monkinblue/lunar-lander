@@ -143,6 +143,38 @@ const SOUND_ASSETS: SoundGenAsset[] = [
     promptInfluence: 0.65,
   },
   {
+    filename: 'emergency_thrust_pulse.mp3',
+    prompt:
+      'EPIC massive solid rocket booster emergency abort ignition, explosive pyrotechnic bolt firing followed by deafening chest-shaking supersonic rocket exhaust blast wave and crackling afterburner roar, realistic cinema IMAX sound.',
+    loop: false,
+    durationSeconds: 3.0,
+    promptInfluence: 0.72,
+  },
+  {
+    filename: 'computer_transition_dark.mp3',
+    prompt:
+      'Dark scary high-definition 1979 sci-fi mainframe transition sound, deep ominous sub-bass data surge, eerie metallic magnetic tape head sweep, unsettling low analog telemetry resonance.',
+    loop: false,
+    durationSeconds: 2.4,
+    promptInfluence: 0.7,
+  },
+  {
+    filename: 'computer_sector_engage.mp3',
+    prompt:
+      'Heavy ominous sci-fi spacecraft orbital clamp release and dark computer telemetry lock sound, deep resonant industrial thud followed by eerie descending analog mainframe frequency sweep.',
+    loop: false,
+    durationSeconds: 2.0,
+    promptInfluence: 0.7,
+  },
+  {
+    filename: 'computer_touchdown_confirm.mp3',
+    prompt:
+      'Atmospheric dark 1979 sci-fi computer telemetry confirmation chord, deep analog synthesizer harmonic lock, heavy magnetic tape relay seal, eerie solemn Nostromo mainframe tone.',
+    loop: false,
+    durationSeconds: 2.4,
+    promptInfluence: 0.7,
+  },
+  {
     filename: 'button_latch_lock.mp3',
     prompt:
       'Heavy solid industrial steel cockpit latch engaging, chunky mechanical lock clunk and weighty damped metal bolt click.',

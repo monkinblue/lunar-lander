@@ -29,15 +29,20 @@ export const PHYSICS = {
   THROTTLE_SPOOL_UP_RATE: 4.6, // /s
   THROTTLE_SPOOL_DOWN_RATE: 6.4, // /s
 
-  // Attitude & RCS (Increased roll authority & preserved rotational momentum)
-  RCS_TORQUE_NM: 12200,
-  RCS_BURN_RATE_KG_S: 0.85,
-  SAS_DAMPING_TORQUE: 1550,
-  SAS_BURN_RATE_KG_S: 0.25,
+  // Attitude & RCS (Snappy high-authority roll speed & preserved momentum)
+  RCS_TORQUE_NM: 24800,
+  RCS_BURN_RATE_KG_S: 0.80,
+  SAS_DAMPING_TORQUE: 3400,
+  SAS_BURN_RATE_KG_S: 0.22,
+
+  // Emergency One-Time Solid-Rocket Thrust Pulse ([SPACEBAR])
+  EMERGENCY_PULSE_THRUST_N: 26500,
+  EMERGENCY_PULSE_DURATION_S: 0.46,
+  EMERGENCY_PULSE_INSTANT_DV: 3.8,
 
   // S / Down Retro-Stabilizer Assist
-  RETRO_ANGULAR_DAMP: 7200,
-  RETRO_UPRIGHT_TORQUE: 5200,
+  RETRO_ANGULAR_DAMP: 10500,
+  RETRO_UPRIGHT_TORQUE: 6200,
   RETRO_LATERAL_THRUST_N: 2100,
   RETRO_BURN_RATE_KG_S: 3.8,
 
@@ -50,18 +55,18 @@ export const PHYSICS = {
   STRUT_SPRING_K: 42000,
   STRUT_DAMPER_C: 9200,
 
-  // Sensors & Discrete Tactical Radar Cell Charges
-  CAPACITOR_RECHARGE_PER_S: 7.5, // Slow emergency-only cell regen when 0 charges remain
+  // Sensors & 3 Discrete Tactical Radar Cell Charges ([LEFT-CLICK])
+  CAPACITOR_RECHARGE_PER_S: 6.5, // Slow emergency-only cell regen when 0 charges remain
   OMNI_LIDAR_COST: 1,
-  OMNI_LIDAR_RANGE_M: 215,
-  OMNI_LIDAR_SPEED_M_S: 165,
+  OMNI_LIDAR_RANGE_M: 225,
+  OMNI_LIDAR_SPEED_M_S: 175,
   DIR_LIDAR_COST: 1,
-  DIR_LIDAR_RANGE_M: 285,
-  DIR_LIDAR_SPEED_M_S: 215,
-  DIR_LIDAR_HALF_ARC: 0.36, // ~41 deg focused long-range cone
-  SPOTLIGHT_RANGE_M: 42, // Short-range nose inspection beam so caves genuinely require radar
+  DIR_LIDAR_RANGE_M: 295,
+  DIR_LIDAR_SPEED_M_S: 225,
+  DIR_LIDAR_HALF_ARC: 0.56, // Generous ~64 deg tactical cone for 3-charge radar economy
+  SPOTLIGHT_RANGE_M: 42,
   SPOTLIGHT_HALF_ARC: 0.17,
-  LIDAR_DECAY_SECONDS: 1.75, // Fast phosphor fade so radar sweeps must be timed tactically
+  LIDAR_DECAY_SECONDS: 2.35,
 
   // Approach & Landing Thresholds
   APPROACH_PROXIMITY_M: 80,
