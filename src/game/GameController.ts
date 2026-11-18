@@ -58,6 +58,7 @@ export class GameController {
   private endlessSeed = 203779;
   private selectedStartSector = 1;
   private missionScore = 0;
+  private displayedScore = 0;
   private dropStreak = 0;
   private highestSectorCode = 'SEC-01';
   private accuracySamples: number[] = [];
@@ -77,18 +78,20 @@ export class GameController {
   private bootProgressChars = 0;
   private bootVoicePlayed = false;
   private briefingProgressChars = 0;
-  private ambientChirpTimer = 9.5;
+  private ambientChirpTimer = 26.0;
   private activeCalloutText: string | null = null;
   private activeCalloutTimer = 0;
   private statusBannerText: string | null = null;
   private statusBannerTimer = 0;
   private menuCursor = 0;
 
-  // Per-sector callout latches
+  // Per-sector callout latches & thruster ignition edge
   private warnedFuelLow = false;
   private warnedWind = false;
   private warnedInterference = false;
   private proximityVoiceCooldown = 0;
+  private bankAngleVoiceCooldown = 0;
+  private wasMainEngineLit = false;
 
   // Camera & CRT Glitch FX
   private manualZoom = 1.15;
@@ -296,7 +299,7 @@ export class GameController {
           this.bezelUi.draggingDial = true;
           const val = this.bezelUi.dialValueFromPointer(e.clientX, e.clientY);
           if (val !== null) this.bezelState.crtIntensity = val;
-          this.audio.playSfx('keypress_return', { pitch: 1.12, volume: 0.75 });
+          this.audio.playButtonLatchLock(1.06, 0.85);
         } else {
           this.activateBezelControl(bezelHit);
         }
@@ -316,12 +319,12 @@ export class GameController {
       const cy = mapped.v * this.crtRect.height;
       const hudBtn = this.hitTestHudButtons(cx, cy);
       if (hudBtn) {
-        this.audio.playSfx('keypress_return', { pitch: 1.0, volume: 0.85 });
+        this.audio.playButtonLatchLock(0.96, 0.96);
         this.handleHudButtonClick(hudBtn);
         return;
       }
 
-      // 3. Left-Click during Flight: Focused Directional LIDAR Ping toward cursor!
+      // 3. Left-Click during Flight: Focused Directional LIDAR Ping toward cursor (costs 1 cell)!
       if (this.phase === 'FLIGHT' && !this.bezelState.flightLogsOpen && this.lander.alive) {
         const cam = this.buildCameraView();
         this.cursorWorld = this.worldRenderer.screenToWorld(cam, cx, cy);
@@ -332,10 +335,11 @@ export class GameController {
 
         if (this.physics.triggerDirectionalLidar(this.lander)) {
           const pan = (mapped.u - 0.5) * 0.8;
-          this.audio.playSfx('lidar_ping', { pitch: 1.24, pan, volume: 0.9 });
+          this.audio.playButtonLatchLock(1.12, 0.55);
+          this.audio.playSfx('lidar_ping', { pitch: 1.18, pan, volume: 0.92 });
         } else {
-          this.audio.playSfx('ui_keyclick', { pitch: 0.6, volume: 0.5 });
-          this.showStatusToast('SENSOR CAPACITOR RECHARGING', 1.1);
+          this.audio.playButtonLatchLock(0.72, 0.65);
+          this.showStatusToast('NO RADAR CELLS — RESERVE GEN CHARGING', 1.3);
         }
       }
     });
@@ -384,7 +388,7 @@ export class GameController {
   }
 
   private activateBezelControl(id: BezelControlId): void {
-    this.audio.playSfx('keypress_return', { pitch: 0.96, volume: 0.9 });
+    this.audio.playButtonLatchLock(0.92, 0.98);
     switch (id) {
       case 'sas':
         this.bezelState.sasEnabled = !this.bezelState.sasEnabled;
@@ -479,7 +483,7 @@ export class GameController {
   private handleKeyDown(e: KeyboardEvent): void {
     if (this.bezelState.flightLogsOpen) {
       if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space') {
-        this.audio.playSfx('ui_keyclick');
+        this.audio.playButtonLatchLock(0.95, 0.9);
         this.bezelState.flightLogsOpen = false;
       }
       return;
@@ -487,7 +491,7 @@ export class GameController {
 
     if (this.phase === 'BOOT') {
       if (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') {
-        this.audio.playSfx('keypress_return', { volume: 0.88 });
+        this.audio.playButtonLatchLock(0.94, 0.95);
         this.advanceFromBoot();
       }
       return;
@@ -501,21 +505,21 @@ export class GameController {
         this.menuCursor = (this.menuCursor + 1) % 4;
         this.audio.playSfx('ui_keyclick');
       } else if (e.code === 'Digit1') {
-        this.audio.playSfx('keypress_return');
+        this.audio.playButtonLatchLock();
         this.startCampaign(this.selectedStartSector);
       } else if (e.code === 'Digit2') {
-        this.audio.playSfx('keypress_return');
+        this.audio.playButtonLatchLock();
         this.startEndlessDeepSurvey();
       } else if (e.code === 'Digit3' || e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
-        this.audio.playSfx('ui_keyclick');
+        this.audio.playButtonLatchLock(1.04, 0.85);
         const delta = e.code === 'ArrowLeft' ? -1 : 1;
         this.selectedStartSector =
           ((this.selectedStartSector - 1 + delta + 6) % 6) + 1;
       } else if (e.code === 'Digit4') {
-        this.audio.playSfx('keypress_return');
+        this.audio.playButtonLatchLock();
         this.bezelState.flightLogsOpen = true;
       } else if (e.code === 'Enter' || e.code === 'Space') {
-        this.audio.playSfx('keypress_return');
+        this.audio.playButtonLatchLock();
         const ids = ['menu-campaign', 'menu-endless', 'menu-sector-cycle', 'menu-logs'];
         this.handleHudButtonClick(ids[this.menuCursor]);
       }
@@ -524,7 +528,7 @@ export class GameController {
 
     if (this.phase === 'SECTOR_BRIEFING') {
       if (e.code === 'Space' || e.code === 'Enter') {
-        this.audio.playSfx('keypress_return');
+        this.audio.playButtonLatchLock();
         const totalBriefChars = this.sector.briefingLines.reduce((acc, s) => acc + s.length, 0);
         if (this.briefingProgressChars < totalBriefChars) {
           this.briefingProgressChars = totalBriefChars;
@@ -532,6 +536,7 @@ export class GameController {
           this.beginSectorFlight();
         }
       } else if (e.code === 'Escape') {
+        this.audio.playButtonLatchLock(0.9, 0.85);
         this.phase = 'TITLE_MENU';
       }
       return;
@@ -540,16 +545,17 @@ export class GameController {
     if (this.phase === 'FLIGHT') {
       if (e.code === 'Space' && !e.repeat) {
         if (this.physics.triggerOmniLidar(this.lander)) {
+          this.audio.playButtonLatchLock(1.02, 0.6);
           this.audio.playSfx('lidar_ping', { pitch: 0.86, volume: 1.0 });
         } else {
-          this.audio.playSfx('ui_keyclick', { pitch: 0.6, volume: 0.5 });
-          this.showStatusToast('CAPACITOR INSUFFICIENT FOR RADIAL SWEEP', 1.2);
+          this.audio.playButtonLatchLock(0.72, 0.65);
+          this.showStatusToast('NO RADAR CELLS — RESERVE GEN CHARGING', 1.3);
         }
       } else if (e.code === 'KeyR' && !e.repeat) {
-        this.audio.playSfx('ui_toggle_switch');
+        this.audio.playButtonLatchLock();
         this.retryCurrentSector();
       } else if (e.code === 'Escape' && !e.repeat) {
-        this.audio.playSfx('ui_keyclick');
+        this.audio.playButtonLatchLock(0.92, 0.85);
         this.menuCursor = 0;
         this.phase = 'PAUSED';
       }
@@ -558,13 +564,13 @@ export class GameController {
 
     if (this.phase === 'PAUSED') {
       if (e.code === 'Escape') {
-        this.audio.playSfx('ui_keyclick');
+        this.audio.playButtonLatchLock();
         this.phase = 'FLIGHT';
       } else if (e.code === 'KeyR') {
-        this.audio.playSfx('ui_keyclick');
+        this.audio.playButtonLatchLock();
         this.retryCurrentSector();
       } else if (e.code === 'KeyQ') {
-        this.audio.playSfx('ui_keyclick');
+        this.audio.playButtonLatchLock();
         this.concludeMissionToManifest();
       } else if (e.code === 'ArrowUp' || e.code === 'KeyW') {
         this.menuCursor = (this.menuCursor + 2) % 3;
@@ -573,7 +579,7 @@ export class GameController {
         this.menuCursor = (this.menuCursor + 1) % 3;
         this.audio.playSfx('ui_keyclick');
       } else if (e.code === 'Enter' || e.code === 'Space') {
-        this.audio.playSfx('ui_keyclick');
+        this.audio.playButtonLatchLock();
         const acts = ['pause-resume', 'pause-retry', 'pause-abort'];
         this.handleHudButtonClick(acts[this.menuCursor]);
       }
@@ -582,7 +588,7 @@ export class GameController {
 
     if (this.phase === 'SECTOR_TALLY') {
       if (e.code === 'Space' || e.code === 'Enter') {
-        this.audio.playSfx('ui_keyclick');
+        this.audio.playButtonLatchLock();
         if (this.tallyAnimProgress < 1) {
           this.tallyAnimProgress = 1;
         } else {
@@ -594,10 +600,10 @@ export class GameController {
 
     if (this.phase === 'HULL_BREACH') {
       if (e.code === 'KeyR' || e.code === 'Space' || e.code === 'Enter') {
-        this.audio.playSfx('ui_keyclick');
+        this.audio.playButtonLatchLock();
         this.retryCurrentSector();
       } else if (e.code === 'KeyM' || e.code === 'Escape') {
-        this.audio.playSfx('ui_keyclick');
+        this.audio.playButtonLatchLock();
         this.concludeMissionToManifest();
       }
       return;
@@ -605,7 +611,7 @@ export class GameController {
 
     if (this.phase === 'CAMPAIGN_COMPLETE') {
       if (e.code === 'Enter' || e.code === 'Space') {
-        this.audio.playSfx('ui_keyclick');
+        this.audio.playButtonLatchLock();
         this.concludeMissionToManifest();
       }
       return;
@@ -616,7 +622,7 @@ export class GameController {
         this.callsignDraft = this.callsignDraft.slice(0, -1);
         this.audio.playSfx('ui_keyclick', { pitch: 0.9 });
       } else if (e.code === 'Enter') {
-        this.audio.playSfx('ui_toggle_switch');
+        this.audio.playButtonLatchLock();
         this.submitCallsign();
       } else if (e.key.length === 1 && /^[a-zA-Z0-9_-]$/.test(e.key)) {
         if (this.callsignDraft.length < 10) {
@@ -649,6 +655,7 @@ export class GameController {
   private startCampaign(startSector: number): void {
     this.endlessMode = false;
     this.missionScore = 0;
+    this.displayedScore = 0;
     this.dropStreak = 0;
     this.accuracySamples = [];
     this.loadSector(SectorGenerator.createCampaignSector(startSector));
@@ -659,6 +666,7 @@ export class GameController {
     this.endlessDepth = 1;
     this.endlessSeed = (Date.now() & 0xffffffff) >>> 0;
     this.missionScore = 0;
+    this.displayedScore = 0;
     this.dropStreak = 0;
     this.accuracySamples = [];
     this.loadSector(SectorGenerator.createEndlessSector(this.endlessDepth, this.endlessSeed));
@@ -788,6 +796,9 @@ export class GameController {
 
     this.tallyAnimProgress = 0;
     this.phase = 'SECTOR_TALLY';
+    if (evalResult.grade !== 'HARD_SURVIVAL') {
+      this.audio.playSfx('landing_soft_mech', { pitch: 0.96, volume: 0.95 });
+    }
     this.triggerVoice('voice_touchdown', true);
     this.logEvent(
       `${this.sector.code} EXTRACTED [${pad.label} ${padMultiplier}X] // +${sectorTotal.toLocaleString()} PTS`
@@ -875,7 +886,18 @@ export class GameController {
     if (this.activeCalloutTimer > 0) this.activeCalloutTimer = Math.max(0, this.activeCalloutTimer - dt);
     if (this.statusBannerTimer > 0) this.statusBannerTimer = Math.max(0, this.statusBannerTimer - dt);
     if (this.proximityVoiceCooldown > 0) this.proximityVoiceCooldown = Math.max(0, this.proximityVoiceCooldown - dt);
+    if (this.bankAngleVoiceCooldown > 0) this.bankAngleVoiceCooldown = Math.max(0, this.bankAngleVoiceCooldown - dt);
     if (this.glitchIntensity > 0) this.glitchIntensity = Math.max(0, this.glitchIntensity - dt * 1.45);
+
+    if (this.displayedScore < this.missionScore) {
+      const diff = this.missionScore - this.displayedScore;
+      this.displayedScore = Math.min(
+        this.missionScore,
+        this.displayedScore + Math.max(40, diff * 5.5) * dt
+      );
+    } else {
+      this.displayedScore = this.missionScore;
+    }
 
     // Typewriter progressions & 1979 Alien computer / ASMR muted clacking
     if (this.bootPoweredOn && this.crtWarmupProgress < 1) {
@@ -885,8 +907,8 @@ export class GameController {
     if (this.bootPoweredOn && this.phase !== 'BOOT') {
       this.ambientChirpTimer -= dt;
       if (this.ambientChirpTimer <= 0) {
-        this.ambientChirpTimer = 11 + Math.random() * 6;
-        this.audio.playAlienComputerActivity(0.24);
+        this.ambientChirpTimer = 25 + Math.random() * 14;
+        this.audio.playAlienComputerActivity(0.22);
       }
     }
 
@@ -898,9 +920,8 @@ export class GameController {
         if (Math.floor(this.bootProgressChars / 2.6) > Math.floor(prev / 2.6)) {
           this.audio.playAsmrScrollClack(0.86);
         }
-        // Fire subtle 1979 computer register chirp at line boundaries
-        if (Math.floor(this.bootProgressChars / 62) > Math.floor(prev / 62)) {
-          this.audio.playAlienComputerActivity(0.42);
+        if (Math.floor(this.bootProgressChars / 155) > Math.floor(prev / 155)) {
+          this.audio.playAlienComputerActivity(0.32);
         }
         if (this.bootProgressChars >= totalBoot && !this.bootVoicePlayed) {
           this.bootVoicePlayed = true;
@@ -914,9 +935,6 @@ export class GameController {
         this.briefingProgressChars = Math.min(totalBrief, this.briefingProgressChars + dt * 52);
         if (Math.floor(this.briefingProgressChars / 2.6) > Math.floor(prev / 2.6)) {
           this.audio.playAsmrScrollClack(0.84);
-        }
-        if (Math.floor(this.briefingProgressChars / 75) > Math.floor(prev / 75)) {
-          this.audio.playAlienComputerActivity(0.36);
         }
       }
     } else if (this.phase === 'SECTOR_TALLY' && this.tallyAnimProgress < 1) {
@@ -947,6 +965,10 @@ export class GameController {
       this.simAccumulator += dt;
       const throttleUp =
         this.phase === 'FLIGHT' && (this.keysDown.has('KeyW') || this.keysDown.has('ArrowUp'));
+      if (throttleUp && !this.wasMainEngineLit && this.lander.alive && this.lander.fuelKg > 0.5 && this.lander.throttle < 0.12) {
+        this.audio.playSfx('thruster_ignite', { pitch: 0.9, volume: 0.68 });
+      }
+      this.wasMainEngineLit = throttleUp;
       const overdrive =
         throttleUp && (this.keysDown.has('ShiftLeft') || this.keysDown.has('ShiftRight'));
       const rotateLeft =
@@ -975,19 +997,18 @@ export class GameController {
             onTouchdownConfirmed: (ev) => this.handleTouchdown(ev),
             onHardImpactGlitch: (intensity, reason) => {
               this.glitchIntensity = Math.max(this.glitchIntensity, intensity);
-              this.audio.playSfx('landing_strut_thud', { pitch: 0.78, volume: 1.0 });
-              this.audio.playSfx('proximity_klaxon', { pitch: 0.92, volume: 0.85 });
+              this.audio.playSfx('landing_hard_thud', { pitch: 0.96, volume: 1.0 });
               this.showStatusToast(reason, 2.8);
             },
             onStrutContactThud: (intensity) => {
-              this.audio.playSfx('landing_strut_thud', { pitch: 1.0, volume: intensity });
+              this.audio.playSfx('landing_soft_mech', { pitch: 1.0, volume: Math.max(0.65, intensity) });
             },
             onCatastrophicBreach: (ev) => {
               this.lastFailure = ev;
               this.dropStreak = 0;
               this.glitchIntensity = 1.0;
               this.phase = 'HULL_BREACH';
-              this.audio.playSfx('hull_explosion', { volume: 1.0 });
+              this.audio.playSfx('hull_explosion', { pitch: 0.96, volume: 1.0 });
               this.triggerVoice('voice_hull_breach', true);
               this.logEvent(`HULL BREACH ON ${this.sector.code}: ${ev.reason}`);
             },
@@ -996,7 +1017,7 @@ export class GameController {
       }
       interpAlpha = this.simAccumulator / PHYSICS.FIXED_DT;
 
-      // Check Flight Telemetry Audio Warnings (25% Fuel, Proximity Klaxon, Refuel Reset)
+      // Airbus GPWS Minimal Flight Envelope Warnings ("Pull up.", "Descent rate.", "Bank angle.")
       if (this.phase === 'FLIGHT' && this.lander.alive) {
         const fuelRatio = this.lander.fuelKg / Math.max(1, this.lander.maxFuelKg);
         if (fuelRatio <= 0.25 && !this.warnedFuelLow) {
@@ -1006,15 +1027,28 @@ export class GameController {
           this.warnedFuelLow = false;
         }
 
-        const unsafeProximity =
-          (this.lander.agl < 34 && this.lander.vel.y < -2.45) ||
-          this.lander.ceilingClearance < 16;
-        if (unsafeProximity) {
-          this.audio.playSfx('proximity_klaxon', { pitch: 1.0, volume: 0.75 });
+        const criticalPullUp =
+          (this.lander.agl < 22 && this.lander.vel.y < -3.4) ||
+          (this.lander.ceilingClearance < 14 && this.lander.vel.y > 0.4);
+        const sinkRateWarn = this.lander.agl < 56 && this.lander.vel.y < -2.35;
+        const absPitchDeg = Math.abs((this.lander.angle * 180) / Math.PI);
+        const bankAngleWarn =
+          (this.lander.agl < 95 && absPitchDeg > 15.0) || absPitchDeg > 28.0;
+
+        if (criticalPullUp) {
+          this.audio.playSfx('proximity_klaxon', { pitch: 0.95, volume: 0.7 });
           if (this.proximityVoiceCooldown <= 0) {
-            this.proximityVoiceCooldown = 7.5;
+            this.proximityVoiceCooldown = 3.6;
+            this.triggerVoice('voice_pull_up', true);
+          }
+        } else if (sinkRateWarn) {
+          if (this.proximityVoiceCooldown <= 0) {
+            this.proximityVoiceCooldown = 4.2;
             this.triggerVoice('voice_proximity');
           }
+        } else if (bankAngleWarn && this.bankAngleVoiceCooldown <= 0) {
+          this.bankAngleVoiceCooldown = 4.8;
+          this.triggerVoice('voice_bank_angle');
         }
       }
     }
@@ -1080,6 +1114,7 @@ export class GameController {
       bezel: this.bezelState,
       cameraZoom: this.currentZoom,
       missionScore: this.missionScore,
+      displayedScore: this.displayedScore,
       dropStreak: this.dropStreak,
       selectedStartSector: this.selectedStartSector,
       menuCursor: this.menuCursor,

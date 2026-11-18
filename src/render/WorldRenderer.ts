@@ -102,7 +102,11 @@ export class WorldRenderer {
     sector: SectorConfig,
     emInterference: number
   ): void {
-    const gridAlpha = Math.max(0.18, 0.48 - sector.darknessLevel * 0.28 - emInterference * 0.18);
+    const gridAlpha = Math.max(
+      0.015,
+      (1 - sector.darknessLevel * 0.96) * (1 - emInterference * 0.85) * 0.42
+    );
+    if (gridAlpha < 0.025) return;
     ctx.save();
     ctx.strokeStyle = COLORS.GREEN_DIM;
     ctx.globalAlpha = gridAlpha;
@@ -365,11 +369,13 @@ export class WorldRenderer {
     emInterference: number
   ): { baseAlpha: number; lidarAlpha: number; staticObscured: boolean } {
     const dist = Math.hypot(midX - landerPos.x, midY - landerPos.y);
-    const hullGlow = dist < 34 ? Math.pow(1 - dist / 34, 1.35) * 0.94 : 0;
-    const passiveVisibility = (1 - darknessLevel) * (1 - emInterference * 0.94);
+    const glowRadius = darknessLevel > 0.7 ? 12 : 24;
+    const glowStrength = darknessLevel > 0.7 ? 0.34 : 0.75;
+    const hullGlow = dist < glowRadius ? Math.pow(1 - dist / glowRadius, 1.8) * glowStrength : 0;
+    const passiveVisibility = Math.max(0, 1 - darknessLevel) * Math.max(0, 1 - emInterference * 0.97);
     const baseAlpha = Math.min(1, Math.max(passiveVisibility, hullGlow));
-    const lidarAlpha = Math.min(1, illum);
-    const staticObscured = emInterference > 0.35 && lidarAlpha < 0.12 && dist >= 33;
+    const lidarAlpha = Math.pow(Math.min(1, Math.max(0, illum)), 1.3);
+    const staticObscured = emInterference > 0.35 && lidarAlpha < 0.12 && dist >= glowRadius;
     return { baseAlpha, lidarAlpha, staticObscured };
   }
 
@@ -383,9 +389,9 @@ export class WorldRenderer {
   ): void {
     ctx.save();
 
-    // Solid dark rock occlusion behind wireframe facets
+    // Solid rock occlusion matching BG_DEEP so unpinged cave walls never reveal silhouettes!
     if (sector.terrain.length > 1) {
-      ctx.fillStyle = '#010603';
+      ctx.fillStyle = COLORS.BG_DEEP;
       ctx.beginPath();
       const first = this.worldToScreen(cam, sector.terrain[0].x, sector.terrain[0].y);
       ctx.moveTo(first.x, first.y);
@@ -405,7 +411,7 @@ export class WorldRenderer {
     }
 
     if (sector.ceiling && sector.ceiling.length > 1) {
-      ctx.fillStyle = '#010603';
+      ctx.fillStyle = COLORS.BG_DEEP;
       ctx.beginPath();
       const first = this.worldToScreen(cam, sector.ceiling[0].x, sector.ceiling[0].y);
       ctx.moveTo(first.x, first.y);
@@ -545,39 +551,41 @@ export class WorldRenderer {
     }
 
     // Horizontal perspective ground grid rungs below cliff base
-    ctx.strokeStyle = COLORS.GREEN_DIM;
-    ctx.lineWidth = 1.0;
-    for (const depth of [36, 46, 56]) {
-      ctx.beginPath();
-      let started = false;
-      for (let i = 0; i < poly.length; i += 2) {
-        const p = poly[i];
-        const illum = sector.terrainIllum[Math.min(i, sector.terrainIllum.length - 1)] ?? 0;
-        const vis = this.computeSegmentVisibility(
-          p.x,
-          p.y,
-          illum,
-          landerPos,
-          sector.darknessLevel,
-          emInterference
-        );
-        if (Math.max(vis.baseAlpha, vis.lidarAlpha) < 0.08) {
-          started = false;
-          continue;
+    if (sector.darknessLevel < 0.7 && emInterference < 0.7) {
+      ctx.strokeStyle = COLORS.GREEN_DIM;
+      ctx.lineWidth = 1.0;
+      for (const depth of [36, 46, 56]) {
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < poly.length; i += 2) {
+          const p = poly[i];
+          const illum = sector.terrainIllum[Math.min(i, sector.terrainIllum.length - 1)] ?? 0;
+          const vis = this.computeSegmentVisibility(
+            p.x,
+            p.y,
+            illum,
+            landerPos,
+            sector.darknessLevel,
+            emInterference
+          );
+          if (Math.max(vis.baseAlpha, vis.lidarAlpha) < 0.08) {
+            started = false;
+            continue;
+          }
+          const sp = this.worldToScreen(
+            cam,
+            p.x + (p.x - cam.x) * (depth / 360),
+            p.y - depth
+          );
+          if (!started) {
+            ctx.moveTo(sp.x, sp.y);
+            started = true;
+          } else {
+            ctx.lineTo(sp.x, sp.y);
+          }
         }
-        const sp = this.worldToScreen(
-          cam,
-          p.x + (p.x - cam.x) * (depth / 360),
-          p.y - depth
-        );
-        if (!started) {
-          ctx.moveTo(sp.x, sp.y);
-          started = true;
-        } else {
-          ctx.lineTo(sp.x, sp.y);
-        }
+        ctx.stroke();
       }
-      ctx.stroke();
     }
   }
 
@@ -626,17 +634,17 @@ export class WorldRenderer {
       const combinedAlpha = Math.max(vis.baseAlpha, vis.lidarAlpha);
       if (combinedAlpha < 0.025) continue;
 
-      // Bold high-intensity blooming phosphor crest line
-      if (vis.lidarAlpha > 0.15) {
-        const bright = Math.min(1, 0.45 + vis.lidarAlpha * 0.65);
+      // Toned-down vintage P39 green rock crest line
+      if (vis.lidarAlpha > 0.12) {
+        const bright = Math.min(1, 0.4 + vis.lidarAlpha * 0.6);
         ctx.strokeStyle =
-          vis.lidarAlpha > 0.68
-            ? `rgba(172, 255, 198, ${bright.toFixed(3)})`
-            : `rgba(68, 255, 119, ${bright.toFixed(3)})`;
-        ctx.lineWidth = 2.8 + vis.lidarAlpha * 0.9;
+          vis.lidarAlpha > 0.7
+            ? `rgba(123, 224, 152, ${bright.toFixed(3)})`
+            : `rgba(54, 201, 94, ${bright.toFixed(3)})`;
+        ctx.lineWidth = 2.6 + vis.lidarAlpha * 0.8;
       } else {
-        ctx.strokeStyle = `rgba(68, 255, 119, ${(combinedAlpha * 0.92).toFixed(3)})`;
-        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = `rgba(54, 201, 94, ${(combinedAlpha * 0.88).toFixed(3)})`;
+        ctx.lineWidth = 2.3;
       }
 
       ctx.beginPath();
@@ -1181,7 +1189,7 @@ export class WorldRenderer {
     if (sp.x < 8 || sp.x > cam.widthPx - 8 || sp.y < 8 || sp.y > cam.heightPx - 8) return;
 
     ctx.save();
-    const ready = lander.sensorCapacitor >= PHYSICS.DIR_LIDAR_COST;
+    const ready = lander.radarCharges >= PHYSICS.DIR_LIDAR_COST;
     ctx.strokeStyle = ready ? COLORS.GREEN_PRIMARY : COLORS.AMBER_CAUTION;
     ctx.lineWidth = 1.8;
 

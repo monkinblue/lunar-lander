@@ -59,6 +59,7 @@ export interface SectorConfig {
   emInterference: number; // 0 = clean, 0.85 = heavy ion storm static masking unpinged terrain
   emBlackoutPulse: boolean; // Sector 06 periodic sensor whiteout surges
   dustDensity: number;
+  initialRadarCharges: number;
   endlessMode: boolean;
 }
 
@@ -85,7 +86,9 @@ export interface LanderState {
   strutDamaged: boolean;
   rcsDamaged: boolean;
   tookSectorDamage: boolean;
-  sensorCapacitor: number; // 0 .. 100
+  sensorCapacitor: number; // 0 .. 100 (emergency cell backup progress when 0 charges remain)
+  radarCharges: number;
+  maxRadarCharges: number;
   spotlightAngle: number; // world angle (atan2(dy, dx))
   spotlightRange: number;
   spotlightHit: Vec2 | null;
@@ -218,6 +221,8 @@ export type VoiceCalloutId =
   | 'voice_interference'
   | 'voice_fuel_low'
   | 'voice_proximity'
+  | 'voice_pull_up'
+  | 'voice_bank_angle'
   | 'voice_touchdown'
   | 'voice_hull_breach';
 
@@ -228,9 +233,13 @@ export type SfxId =
   | 'tape_drive_servo'
   | 'ui_keyclick'
   | 'ui_keyclick_alt'
+  | 'button_latch_lock'
   | 'keypress_return'
   | 'ui_toggle_switch'
+  | 'thruster_ignite'
   | 'lidar_ping'
   | 'proximity_klaxon'
+  | 'landing_soft_mech'
+  | 'landing_hard_thud'
   | 'landing_strut_thud'
   | 'hull_explosion';

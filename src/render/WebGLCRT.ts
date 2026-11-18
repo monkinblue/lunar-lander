@@ -10,9 +10,9 @@ void main() {
 `;
 
 /**
- * Pass 1: Electron-Beam Spot Softening + Ping-Pong Phosphor Persistence Buffer
- * Softens razor-sharp 2D canvas strokes into an analog electron beam and accumulates
- * P39 green / amber decaying trails (~0.88-0.93 per 60Hz frame) with subtle horizontal bleed.
+ * Pass 1: Ping-Pong P39 / Burnt-Orange Phosphor Persistence Buffer
+ * Accumulates strong, lingering cathode afterglow trails (~0.94–0.965 per 60Hz frame)
+ * behind moving lander trusses, flames, radar sweeps, and dial needles.
  */
 const ACCUM_FRAGMENT_SRC = `
 precision highp float;
@@ -27,44 +27,38 @@ uniform float uDtFrames;
 void main() {
   vec2 texel = 1.0 / max(uResolution, vec2(1.0));
 
-  // Soften raw digital vector edges into a warm analog electron-beam spot
-  // with slight horizontal video-amplifier smear
   vec3 c0 = texture2D(uSourceTex, vUv).rgb;
-  vec3 cL = texture2D(uSourceTex, vUv - vec2(texel.x * 1.15, 0.0)).rgb;
-  vec3 cR = texture2D(uSourceTex, vUv + vec2(texel.x * 1.35, 0.0)).rgb;
-  vec3 cU = texture2D(uSourceTex, vUv + vec2(0.0, texel.y * 0.95)).rgb;
-  vec3 cD = texture2D(uSourceTex, vUv - vec2(0.0, texel.y * 0.95)).rgb;
+  vec3 cL = texture2D(uSourceTex, vUv - vec2(texel.x * 1.1, 0.0)).rgb;
+  vec3 cR = texture2D(uSourceTex, vUv + vec2(texel.x * 1.25, 0.0)).rgb;
+  vec3 beam = c0 * 0.62 + cL * 0.20 + cR * 0.18;
 
-  vec3 softenedBeam = c0 * 0.48 + (cL * 0.16 + cR * 0.14 + cU * 0.11 + cD * 0.11);
-
-  // Sample previous persistence frame with micro rightward raster phosphor bleed
-  vec3 prev0 = texture2D(uPrevTex, clamp(vUv - vec2(texel.x * 0.45, 0.0), 0.001, 0.999)).rgb;
-  vec3 prevBlur = (
-    prev0 * 0.68 +
-    texture2D(uPrevTex, clamp(vUv + vec2(texel.x * 1.2, 0.0), 0.001, 0.999)).rgb * 0.18 +
-    texture2D(uPrevTex, clamp(vUv - vec2(0.0, texel.y * 1.0), 0.001, 0.999)).rgb * 0.14
+  // Slight horizontal raster bleed on decaying phosphor persistence
+  vec3 prev0 = texture2D(uPrevTex, clamp(vUv - vec2(texel.x * 0.4, 0.0), 0.001, 0.999)).rgb;
+  vec3 prevSmear = (
+    prev0 * 0.74 +
+    texture2D(uPrevTex, clamp(vUv + vec2(texel.x * 1.1, 0.0), 0.001, 0.999)).rgb * 0.16 +
+    texture2D(uPrevTex, clamp(vUv - vec2(0.0, texel.y * 0.9), 0.001, 0.999)).rgb * 0.10
   );
 
-  // Authentic P39 green + amber long-persistence decay rates per channel
+  // Long P39 green & burnt-orange phosphor persistence curve
   vec3 channelDecay = pow(
-    vec3(uDecayBase - 0.018, uDecayBase + 0.012, uDecayBase - 0.045),
+    vec3(uDecayBase - 0.010, uDecayBase + 0.008, uDecayBase - 0.035),
     vec3(uDtFrames)
   );
-  vec3 decayed = prevBlur * channelDecay;
+  vec3 decayed = prevSmear * channelDecay;
 
-  // Flush sub-threshold residual values to zero so deep black-green never fogs
-  decayed *= smoothstep(0.008, 0.035, max(decayed.r, max(decayed.g, decayed.b)));
+  // Flush tiny residual below background floor so unlit areas stay clean smoked gray-green
+  decayed *= smoothstep(0.028, 0.085, max(decayed.r, max(decayed.g, decayed.b)));
 
-  vec3 outCol = max(softenedBeam, decayed);
-  gl_FragColor = vec4(outCol, 1.0);
+  gl_FragColor = vec4(max(beam, decayed), 1.0);
 }
 `;
 
 /**
- * Pass 2: Curved P39/Amber Cathode-Ray Tube Composite
- * Applies curved glass barrel distortion, corner electron-beam defocus, phosphor ghost trails,
- * multi-ring glass halation, dense curved scanlines, shadow-mask triads, 60Hz HV deflection jitter,
- * dynamic horizontal sync tears, inner bezel vignette, and smoked glass glare/scuffs.
+ * Pass 2: 1979 Pixelated Raster CRT Tube Composite
+ * Quantizes signal onto a vintage low-res CRT raster lattice, blends strong phosphor persistence,
+ * applies tighter/smaller localized halation, lifts black floor for softer analog contrast,
+ * tones down peak green brightness, and renders scanline/phosphor cell grid + smoked glass glare.
  */
 const COMPOSITE_FRAGMENT_SRC = `
 precision highp float;
@@ -73,6 +67,7 @@ varying vec2 vUv;
 uniform sampler2D uSourceTex;
 uniform sampler2D uAccumTex;
 uniform vec2 uResolution;
+uniform float uDpr;
 uniform float uTime;
 uniform float uCrtIntensity;   // 0.0 .. 1.0 (bezel rotary dial)
 uniform float uInterference;   // 0.0 .. 1.0 (EM ion storm)
@@ -106,13 +101,12 @@ void main() {
   float curveAmt = 0.28 + dial * 0.92;
   vec2 uv = warpUV(vUv, curveAmt);
 
-  // Moulded dark CRT bezel cut-out & recessed tube rim
   float mask = roundedTubeMask(uv, 0.068);
   if (mask <= 0.001 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
     vec2 edgeDist = abs(vUv * 2.0 - 1.0);
     float rim = smoothstep(0.995, 0.92, max(edgeDist.x, edgeDist.y));
     float grain = (hash12(gl_FragCoord.xy * 0.5) - 0.5) * 0.015;
-    vec3 bezelCol = mix(vec3(0.020, 0.027, 0.022), vec3(0.052, 0.066, 0.056), rim * 0.55) + grain;
+    vec3 bezelCol = mix(vec3(0.022, 0.029, 0.024), vec3(0.056, 0.070, 0.060), rim * 0.55) + grain;
     gl_FragColor = vec4(bezelCol, 1.0);
     return;
   }
@@ -121,125 +115,109 @@ void main() {
   vec2 tubeCentered = uv * 2.0 - 1.0;
   float cornerR2 = dot(tubeCentered, tubeCentered);
 
-  // Micro 60Hz high-voltage deflection jitter + high-G burn / impact sync tear
-  float hvJitterX = sin(uTime * 376.99 + uv.y * 42.0) * 0.38 * dial * texel.x;
-  float hvJitterY = cos(uTime * 188.50) * 0.22 * dial * texel.y;
-
+  // Dynamic Signal Tear & Micro 60Hz Deflection Jitter
+  float hvJitterX = sin(uTime * 376.99 + uv.y * 42.0) * 0.35 * dial * texel.x;
   float totalDisturb = clamp(uInterference * 0.62 + uGlitch * 1.25 + uOverdrive * 0.35, 0.0, 1.6);
   float tearWave = sin(uv.y * 29.0 + uTime * 21.0) * sin(uv.y * 8.5 - uTime * 13.0);
   float tearGate = step(0.74 - min(0.58, uGlitch * 0.52 + uOverdrive * 0.18 + uInterference * 0.24), abs(tearWave));
   float tearShift = tearGate * (hash12(vec2(floor(uv.y * 95.0), floor(uTime * 38.0))) - 0.5) * 0.038 * totalDisturb;
 
-  vec2 sampleUv = clamp(uv + vec2(hvJitterX + tearShift, hvJitterY), 0.001, 0.999);
+  vec2 rawSampleUv = clamp(uv + vec2(hvJitterX + tearShift, 0.0), 0.001, 0.999);
 
-  // Corner Defocus + Chromatic Convergence Drift toward tube perimeter
-  float defocus = (0.55 + cornerR2 * 1.55) * (0.45 + dial * 0.75);
-  float fringePx = (0.75 * dial + cornerR2 * 1.35 * dial + totalDisturb * 3.6);
-  vec2 convOffset = (tubeCentered * 0.65 + vec2(0.6, 0.15)) * fringePx * texel;
+  // =========================================================================
+  // 1979 RASTER CRT PIXELATION LATTICE
+  // Quantizes smooth digital vectors onto discrete vintage CRT phosphor cells
+  // (~1.55 CSS px pitch) while preserving crisp sub-cell phosphor edges!
+  // =========================================================================
+  float cellPitchPx = max(1.0, (1.15 + 0.55 * dial) * uDpr);
+  vec2 gridDims = max(vec2(240.0), floor(uResolution / cellPitchPx));
+  vec2 cellPos = rawSampleUv * gridDims;
+  vec2 cellIndex = floor(cellPos);
+  vec2 cellFrac = fract(cellPos);
 
-  // Softened Electron-Beam Live Frame Sample (with corner defocus)
-  vec3 liveC = texture2D(uSourceTex, sampleUv).rgb * 0.42;
-  liveC += texture2D(uSourceTex, clamp(sampleUv + vec2(defocus, 0.0) * texel, 0.001, 0.999)).rgb * 0.145;
-  liveC += texture2D(uSourceTex, clamp(sampleUv - vec2(defocus, 0.0) * texel, 0.001, 0.999)).rgb * 0.145;
-  liveC += texture2D(uSourceTex, clamp(sampleUv + vec2(0.0, defocus) * texel, 0.001, 0.999)).rgb * 0.145;
-  liveC += texture2D(uSourceTex, clamp(sampleUv - vec2(0.0, defocus) * texel, 0.001, 0.999)).rgb * 0.145;
+  // Blend 78% quantized pixel center + 22% smooth sub-sample so small text stays legible yet pixelated
+  vec2 quantUv = (cellIndex + 0.5) / gridDims;
+  vec2 sampleUv = mix(rawSampleUv, quantUv, 0.78);
 
-  // Apply subtle RGB gun convergence fringe
-  float rConv = texture2D(uSourceTex, clamp(sampleUv + convOffset, 0.001, 0.999)).r;
-  float bConv = texture2D(uSourceTex, clamp(sampleUv - convOffset, 0.001, 0.999)).b;
-  liveC.r = mix(liveC.r, rConv, 0.55);
-  liveC.b = mix(liveC.b, bConv, 0.55);
+  // Subtle corner RGB convergence drift
+  float fringePx = (0.55 * dial + cornerR2 * 1.1 * dial + totalDisturb * 3.0);
+  vec2 convOffset = (tubeCentered * 0.6 + vec2(0.5, 0.1)) * fringePx * texel;
 
-  // Phosphor Persistence Ghost Trail from Ping-Pong FBO (with slight horizontal color bleed)
-  vec3 accumC = texture2D(uAccumTex, sampleUv).rgb * 0.65 +
-                texture2D(uAccumTex, clamp(sampleUv - vec2(2.4 * texel.x, 0.0), 0.001, 0.999)).rgb * 0.35;
+  vec3 liveC = texture2D(uSourceTex, sampleUv).rgb;
+  liveC.r = mix(liveC.r, texture2D(uSourceTex, clamp(sampleUv + convOffset, 0.001, 0.999)).r, 0.5);
+  liveC.b = mix(liveC.b, texture2D(uSourceTex, clamp(sampleUv - convOffset, 0.001, 0.999)).b, 0.5);
+
+  // =========================================================================
+  // STRONG P39 / BURNT-ORANGE PHOSPHOR PERSISTENCE TRAILS
+  // =========================================================================
+  vec3 accumC = texture2D(uAccumTex, quantUv).rgb * 0.70 +
+                texture2D(uAccumTex, clamp(quantUv - vec2(1.8 / gridDims.x, 0.0), 0.001, 0.999)).rgb * 0.30;
   vec3 ghostTail = max(accumC - liveC, vec3(0.0));
-  float tailWarmth = smoothstep(0.04, 0.32, ghostTail.r - ghostTail.g * 0.65);
-  vec3 trailTint = mix(vec3(0.90, 1.08, 0.78), vec3(1.16, 0.68, 0.32), tailWarmth);
-  vec3 beamWithPersistence = liveC + ghostTail * trailTint * (0.48 + 0.34 * dial);
+  float tailWarmth = smoothstep(0.04, 0.30, ghostTail.r - ghostTail.g * 0.65);
+  vec3 trailTint = mix(vec3(0.84, 1.02, 0.76), vec3(1.14, 0.65, 0.30), tailWarmth);
+  vec3 beamWithPersistence = liveC + ghostTail * trailTint * (0.72 + 0.30 * dial);
 
-  // Incandescent Electron-Beam Hot Core + Multi-Ring Glass Halation / Bloom
-  float corePeak = max(liveC.r, max(liveC.g, liveC.b));
-  float liveWarmth = smoothstep(0.04, 0.32, liveC.r - liveC.g * 0.65);
-  vec3 hotCore = pow(max(liveC - vec3(0.32), vec3(0.0)), vec3(1.35)) *
-                 mix(vec3(0.65, 0.75, 0.65), vec3(0.85, 0.44, 0.18), liveWarmth);
+  // =========================================================================
+  // TIGHTER, REDUCED-SCALE ANALOG HALATION / BLOOM
+  // =========================================================================
+  vec3 localHalo = vec3(0.0);
+  float rTight = (1.35 + dial * 1.25) * uDpr;
+  float rMid = (3.2 + dial * 2.4) * uDpr;
 
-  vec3 innerHalation = vec3(0.0);
-  vec3 wideHalation = vec3(0.0);
-  float rInner = 2.4 + dial * 2.4;
-  float rWide = 7.0 + dial * 6.5;
+  localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2( rTight, 0.0) * texel, 0.001, 0.999)).rgb * 0.16;
+  localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2(-rTight, 0.0) * texel, 0.001, 0.999)).rgb * 0.16;
+  localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2(0.0,  rTight) * texel, 0.001, 0.999)).rgb * 0.16;
+  localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2(0.0, -rTight) * texel, 0.001, 0.999)).rgb * 0.16;
 
-  innerHalation += texture2D(uAccumTex, clamp(sampleUv + vec2( rInner, 0.0) * texel, 0.001, 0.999)).rgb * 0.16;
-  innerHalation += texture2D(uAccumTex, clamp(sampleUv + vec2(-rInner, 0.0) * texel, 0.001, 0.999)).rgb * 0.16;
-  innerHalation += texture2D(uAccumTex, clamp(sampleUv + vec2(0.0,  rInner) * texel, 0.001, 0.999)).rgb * 0.16;
-  innerHalation += texture2D(uAccumTex, clamp(sampleUv + vec2(0.0, -rInner) * texel, 0.001, 0.999)).rgb * 0.16;
-  innerHalation += texture2D(uAccumTex, clamp(sampleUv + vec2( rInner,  rInner) * 0.71 * texel, 0.001, 0.999)).rgb * 0.09;
-  innerHalation += texture2D(uAccumTex, clamp(sampleUv + vec2(-rInner,  rInner) * 0.71 * texel, 0.001, 0.999)).rgb * 0.09;
-  innerHalation += texture2D(uAccumTex, clamp(sampleUv + vec2( rInner, -rInner) * 0.71 * texel, 0.001, 0.999)).rgb * 0.09;
-  innerHalation += texture2D(uAccumTex, clamp(sampleUv + vec2(-rInner, -rInner) * 0.71 * texel, 0.001, 0.999)).rgb * 0.09;
+  localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2( rMid,  rMid) * 0.71 * texel, 0.001, 0.999)).rgb * 0.09;
+  localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2(-rMid,  rMid) * 0.71 * texel, 0.001, 0.999)).rgb * 0.09;
+  localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2( rMid, -rMid) * 0.71 * texel, 0.001, 0.999)).rgb * 0.09;
+  localHalo += texture2D(uAccumTex, clamp(sampleUv + vec2(-rMid, -rMid) * 0.71 * texel, 0.001, 0.999)).rgb * 0.09;
 
-  wideHalation += texture2D(uAccumTex, clamp(sampleUv + vec2( rWide, 0.0) * texel, 0.001, 0.999)).rgb * 0.15;
-  wideHalation += texture2D(uAccumTex, clamp(sampleUv + vec2(-rWide, 0.0) * texel, 0.001, 0.999)).rgb * 0.15;
-  wideHalation += texture2D(uAccumTex, clamp(sampleUv + vec2(0.0,  rWide) * texel, 0.001, 0.999)).rgb * 0.15;
-  wideHalation += texture2D(uAccumTex, clamp(sampleUv + vec2(0.0, -rWide) * texel, 0.001, 0.999)).rgb * 0.15;
-  wideHalation += texture2D(uAccumTex, clamp(sampleUv + vec2( rWide,  rWide) * 0.71 * texel, 0.001, 0.999)).rgb * 0.10;
-  wideHalation += texture2D(uAccumTex, clamp(sampleUv + vec2(-rWide,  rWide) * 0.71 * texel, 0.001, 0.999)).rgb * 0.10;
-  wideHalation += texture2D(uAccumTex, clamp(sampleUv + vec2( rWide, -rWide) * 0.71 * texel, 0.001, 0.999)).rgb * 0.10;
-  wideHalation += texture2D(uAccumTex, clamp(sampleUv + vec2(-rWide, -rWide) * 0.71 * texel, 0.001, 0.999)).rgb * 0.10;
-
-  vec3 bloomCol = max(innerHalation - vec3(0.02), vec3(0.0)) * (0.48 + 0.58 * dial) +
-                  max(wideHalation - vec3(0.025), vec3(0.0)) * (0.32 + 0.48 * dial);
+  vec3 bloomCol = max(localHalo - vec3(0.045), vec3(0.0)) * (0.22 + 0.30 * dial);
   float bloomWarmth = smoothstep(0.03, 0.25, bloomCol.r - bloomCol.g * 0.65);
-  vec3 bloomTint = mix(vec3(0.86, 1.08, 0.86), vec3(1.18, 0.68, 0.36), bloomWarmth);
+  vec3 bloomTint = mix(vec3(0.82, 0.98, 0.82), vec3(1.16, 0.66, 0.32), bloomWarmth);
 
-  // Subtle ambient green-smoked CRT phosphor faceplate tint (like the 1979 reference photo)
-  vec3 faceplateBase = vec3(0.012, 0.038, 0.020) * (1.0 - cornerR2 * 0.42);
-  vec3 col = faceplateBase + beamWithPersistence + hotCore + bloomCol * bloomTint;
+  // =========================================================================
+  // REDUCED CONTRAST: SMOKED GRAY-GREEN CATHODE FLOOR + TONED-DOWN GREEN PEAK
+  // =========================================================================
+  vec3 smokedFloor = vec3(0.038, 0.076, 0.048) * (1.0 - cornerR2 * 0.36);
+  vec3 col = smokedFloor + beamWithPersistence * 0.90 + bloomCol * bloomTint;
 
-  // Dense Curved CRT Scanlines + Shadow-Mask Aperture Texture
-  float curvedLineCoord = uv.y * uResolution.y * 0.52;
-  float scanWave = sin(curvedLineCoord * 6.2831853) * 0.5 + 0.5;
-  float luma = dot(col, vec3(0.299, 0.587, 0.114));
-  // Bright electron beams bloom across scanline gaps; dim areas show crisp scanlines
-  float scanStrength = (0.11 + 0.20 * dial) * (1.0 - clamp(corePeak * 0.68, 0.0, 0.68));
-  col *= 1.0 - scanStrength * scanWave;
+  // Gently roll off peak green brightness so green is warm & analog rather than blinding neon
+  float isGreenDom = smoothstep(0.02, 0.25, col.g - col.r);
+  col.g *= mix(1.0, 0.86, isGreenDom);
+  // Soft analog shoulder compression
+  col = col / (1.0 + col * 0.20);
 
-  // Staggered CRT Shadow-Mask Triad Texture
-  float maskRow = mod(floor(gl_FragCoord.y), 2.0) * 1.5708;
-  float shadowMask = sin(gl_FragCoord.x * 2.35 + maskRow) * 0.5 + 0.5;
-  col *= 1.0 - (0.04 + 0.065 * dial) * shadowMask;
+  // Discrete Pixel-Cell & Curved Scanline Grid (makes individual CRT pixels tactile!)
+  float cellGapX = smoothstep(0.0, 0.20, cellFrac.x) * smoothstep(1.0, 0.80, cellFrac.x);
+  float cellGapY = smoothstep(0.0, 0.26, cellFrac.y) * smoothstep(1.0, 0.74, cellFrac.y);
+  float pixelMatrix = mix(1.0, cellGapX * cellGapY, 0.24 + 0.22 * dial);
 
-  // 60Hz High-Voltage Cathode Hum & Flicker
-  float flicker = 1.0 - (0.010 + 0.018 * dial) * sin(uTime * 376.991)
-                      - 0.008 * dial * sin(uTime * 62.83 + uv.y * 5.0);
+  float corePeak = max(liveC.r, max(liveC.g, liveC.b));
+  // Bright pixels fill slightly more of their phosphor cell; dim background shows clear raster grid
+  col *= mix(pixelMatrix, 1.0, corePeak * 0.35);
+
+  // Subtle 60Hz Cathode Flicker & Analog Grain
+  float flicker = 1.0 - (0.008 + 0.014 * dial) * sin(uTime * 376.991);
   col *= flicker;
 
-  // Analog Static Snow (storm interference, high-G overdrive, impact shock)
-  float snowAmt = uInterference * 0.13 + uGlitch * 0.28 + uOverdrive * 0.035 + 0.012 * dial;
-  float snow = hash12(gl_FragCoord.xy + vec2(uTime * 613.7, uTime * 271.3)) - 0.5;
-  col += vec3(0.26, 0.95, 0.44) * snow * snowAmt;
+  float snowAmt = uInterference * 0.13 + uGlitch * 0.26 + uOverdrive * 0.03 + 0.020;
+  float snow = hash12(cellIndex + vec2(floor(uTime * 30.0) * 17.3, floor(uTime * 30.0) * 9.1)) - 0.5;
+  col += vec3(0.28, 0.72, 0.38) * snow * snowAmt;
 
-  // Smoked Glass Overhead Studio Glare & Subtle Micro-Scuffs (matching reference monitor)
-  // Note: uv.y = 1.0 is top of CRT in WebGL UV space
+  // Smoked Glass Studio Glare & Subtle Scuffs
   vec2 glarePos1 = tubeCentered - vec2(-0.34, 0.42);
-  float warmLampGlare = exp(-dot(glarePos1, glarePos1) * 5.6) * (0.038 + 0.048 * dial);
+  float warmLampGlare = exp(-dot(glarePos1, glarePos1) * 5.6) * (0.034 + 0.042 * dial);
   vec2 glarePos2 = tubeCentered - vec2(-0.55, 0.64);
-  float glassSheen = exp(-dot(glarePos2 * vec2(0.7, 1.3), glarePos2 * vec2(0.7, 1.3)) * 2.4) * (0.025 + 0.032 * dial);
+  float glassSheen = exp(-dot(glarePos2 * vec2(0.7, 1.3), glarePos2 * vec2(0.7, 1.3)) * 2.4) * (0.022 + 0.028 * dial);
+  col += vec3(0.92, 0.76, 0.56) * warmLampGlare + vec3(0.42, 0.64, 0.50) * glassSheen;
 
-  // Subtle curved glass micro-scuff catchlights illuminated near glare region
-  float scuffLine1 = exp(-abs((tubeCentered.x * 0.82 + tubeCentered.y * 0.57) - 0.08) * 190.0) *
-                     smoothstep(0.55, 0.0, length(glarePos1));
-  float scuffLine2 = exp(-abs((tubeCentered.x * -0.45 + tubeCentered.y * 0.89) - 0.46) * 230.0) *
-                     smoothstep(0.65, 0.1, length(glarePos2));
-  float scuffs = (scuffLine1 + scuffLine2) * 0.022 * dial;
-
-  col += vec3(0.95, 0.84, 0.64) * warmLampGlare +
-         vec3(0.45, 0.72, 0.56) * (glassSheen + scuffs);
-
-  // Deep Recessed Bezel Shadow Vignette around curved glass perimeter
-  float vignette = clamp(1.0 - cornerR2 * (0.15 + 0.20 * dial), 0.38, 1.0);
+  // Recessed Bezel Shadow Vignette
+  float vignette = clamp(1.0 - cornerR2 * (0.14 + 0.18 * dial), 0.42, 1.0);
   float edgeShadow = smoothstep(0.0, 0.065, 1.0 - max(abs(tubeCentered.x), abs(tubeCentered.y)));
-  col *= vignette * mix(0.25, 1.0, edgeShadow);
+  col *= vignette * mix(0.28, 1.0, edgeShadow);
 
   gl_FragColor = vec4(col * mask, 1.0);
 }
@@ -281,6 +259,7 @@ export class WebGLCRT {
   private uCompSource: WebGLUniformLocation | null = null;
   private uCompAccum: WebGLUniformLocation | null = null;
   private uCompRes: WebGLUniformLocation | null = null;
+  private uCompDpr: WebGLUniformLocation | null = null;
   private uCompTime: WebGLUniformLocation | null = null;
   private uCompCrtIntensity: WebGLUniformLocation | null = null;
   private uCompInterference: WebGLUniformLocation | null = null;
@@ -319,7 +298,6 @@ export class WebGLCRT {
     this.accumProgram = accumProg;
     this.compositeProgram = compProg;
 
-    // Align uploaded 2D Canvas Y-orientation with WebGL FBO texture space
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
 
     const verts = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]);
@@ -329,7 +307,6 @@ export class WebGLCRT {
 
     this.sourceTexture = this.createLinearTexture(gl);
 
-    // Cache Pass 1 locations
     this.aAccumPos = gl.getAttribLocation(accumProg, 'aPosition');
     this.uAccumSource = gl.getUniformLocation(accumProg, 'uSourceTex');
     this.uAccumPrev = gl.getUniformLocation(accumProg, 'uPrevTex');
@@ -337,11 +314,11 @@ export class WebGLCRT {
     this.uAccumDecay = gl.getUniformLocation(accumProg, 'uDecayBase');
     this.uAccumDtFrames = gl.getUniformLocation(accumProg, 'uDtFrames');
 
-    // Cache Pass 2 locations
     this.aCompPos = gl.getAttribLocation(compProg, 'aPosition');
     this.uCompSource = gl.getUniformLocation(compProg, 'uSourceTex');
     this.uCompAccum = gl.getUniformLocation(compProg, 'uAccumTex');
     this.uCompRes = gl.getUniformLocation(compProg, 'uResolution');
+    this.uCompDpr = gl.getUniformLocation(compProg, 'uDpr');
     this.uCompTime = gl.getUniformLocation(compProg, 'uTime');
     this.uCompCrtIntensity = gl.getUniformLocation(compProg, 'uCrtIntensity');
     this.uCompInterference = gl.getUniformLocation(compProg, 'uInterference');
@@ -437,10 +414,6 @@ export class WebGLCRT {
     return shader;
   }
 
-  /**
-   * Maps CSS viewport coordinates (clientX, clientY) inside crtRect through the exact
-   * CRT barrel distortion curve so mouse aiming & HUD buttons align sub-pixel accurately.
-   */
   public mapClientToCrtUv(
     clientX: number,
     clientY: number,
@@ -500,14 +473,16 @@ export class WebGLCRT {
       return;
     }
 
-    const dtSec = this.lastRenderTime < 0 ? 1 / 60 : Math.max(0.004, Math.min(0.1, timeSec - this.lastRenderTime));
+    const dtSec =
+      this.lastRenderTime < 0
+        ? 1 / 60
+        : Math.max(0.004, Math.min(0.1, timeSec - this.lastRenderTime));
     this.lastRenderTime = timeSec;
     const dtFrames = dtSec * 60.0;
 
     const srcW = Math.max(1, sourceCanvas.width);
     const srcH = Math.max(1, sourceCanvas.height);
 
-    // Upload newly rendered 2D Vector Canvas frame
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.sourceTexture);
@@ -523,9 +498,7 @@ export class WebGLCRT {
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
 
-    // =========================================================================
-    // PASS 1: PING-PONG PHOSPHOR PERSISTENCE & ELECTRON BEAM SOFTENING
-    // =========================================================================
+    // Pass 1: Strong Phosphor Persistence Ping-Pong FBO (~0.935–0.968 per 60Hz frame)
     let accumTexToSample: WebGLTexture = this.sourceTexture;
     if (this.pingPong) {
       const readTarget = this.pingPong[this.readIdx];
@@ -547,8 +520,7 @@ export class WebGLCRT {
       gl.bindTexture(gl.TEXTURE_2D, readTarget.tex);
       gl.uniform1i(this.uAccumPrev, 1);
 
-      // Decay ~0.88–0.93 per 60Hz frame
-      const decayBase = 0.885 + Math.max(0, Math.min(1, crtIntensity)) * 0.042;
+      const decayBase = 0.932 + Math.max(0, Math.min(1, crtIntensity)) * 0.033;
       gl.uniform2f(this.uAccumRes, srcW, srcH);
       gl.uniform1f(this.uAccumDecay, decayBase);
       gl.uniform1f(this.uAccumDtFrames, dtFrames);
@@ -559,9 +531,7 @@ export class WebGLCRT {
       accumTexToSample = writeTarget.tex;
     }
 
-    // =========================================================================
-    // PASS 2: CURVED CRT TUBE COMPOSITE TO SCREEN VIEWPORT
-    // =========================================================================
+    // Pass 2: Pixelated Raster CRT Tube Composite
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clearColor(0.039, 0.051, 0.043, 1.0);
@@ -587,6 +557,7 @@ export class WebGLCRT {
     gl.uniform1i(this.uCompAccum, 1);
 
     gl.uniform2f(this.uCompRes, vpW, vpH);
+    gl.uniform1f(this.uCompDpr, dpr);
     gl.uniform1f(this.uCompTime, timeSec);
     gl.uniform1f(this.uCompCrtIntensity, crtIntensity);
     gl.uniform1f(this.uCompInterference, interference);

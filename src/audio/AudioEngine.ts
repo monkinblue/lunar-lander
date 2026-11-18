@@ -357,13 +357,26 @@ export class AudioEngine {
 
     this.mainThrusterFilter = ctx.createBiquadFilter();
     this.mainThrusterFilter.type = 'lowpass';
-    this.mainThrusterFilter.frequency.value = 180;
-    this.mainThrusterFilter.Q.value = 1.15;
+    this.mainThrusterFilter.frequency.value = 160;
+    this.mainThrusterFilter.Q.value = 0.52; // Non-resonant butter-smooth rolloff (zero whistle!)
+
+    const subBassShelf = ctx.createBiquadFilter();
+    subBassShelf.type = 'lowshelf';
+    subBassShelf.frequency.value = 125;
+    subBassShelf.gain.value = 5.5;
+
+    const harshNotch = ctx.createBiquadFilter();
+    harshNotch.type = 'peaking';
+    harshNotch.frequency.value = 2300;
+    harshNotch.Q.value = 1.2;
+    harshNotch.gain.value = -7.5;
 
     this.mainThrusterGain = ctx.createGain();
     this.mainThrusterGain.gain.value = 0;
 
-    this.mainThrusterFilter.connect(this.mainThrusterGain);
+    this.mainThrusterFilter.connect(subBassShelf);
+    subBassShelf.connect(harshNotch);
+    harshNotch.connect(this.mainThrusterGain);
     this.mainThrusterGain.connect(this.masterGain);
     this.restartLoopSource('thruster_main_loop');
 
@@ -468,15 +481,16 @@ export class AudioEngine {
       return;
     }
 
+    // Deep SpaceX Starship Raptor flame curve: low baritone pitch (0.72x..0.96x) & warm 160Hz..1350Hz roar
     const clampedNorm = Math.max(0, Math.min(1, throttle));
     const overdriveExtra = Math.max(0, throttle - 1);
-    const targetRate = 0.85 + clampedNorm * 0.4 + overdriveExtra * 0.32;
-    const targetCutoff = 180 + Math.pow(clampedNorm, 1.15) * 3020 + overdriveExtra * 900;
-    const targetMainGain = throttle > 0.005 ? Math.min(0.84, 0.16 + throttle * 0.52) : 0;
+    const targetRate = 0.72 + clampedNorm * 0.24 + overdriveExtra * 0.08;
+    const targetCutoff = 160 + Math.pow(clampedNorm, 1.1) * 1190 + overdriveExtra * 340;
+    const targetMainGain = throttle > 0.005 ? Math.min(0.88, 0.18 + throttle * 0.54) : 0;
 
-    this.mainThrusterSource?.playbackRate.setTargetAtTime(targetRate, now, 0.04);
-    this.mainThrusterFilter?.frequency.setTargetAtTime(targetCutoff, now, 0.04);
-    this.mainThrusterGain?.gain.setTargetAtTime(targetMainGain, now, 0.035);
+    this.mainThrusterSource?.playbackRate.setTargetAtTime(targetRate, now, 0.05);
+    this.mainThrusterFilter?.frequency.setTargetAtTime(targetCutoff, now, 0.05);
+    this.mainThrusterGain?.gain.setTargetAtTime(targetMainGain, now, 0.04);
 
     const targetPan = Math.max(-0.6, Math.min(0.6, rcsDirection * 0.52));
     const targetRcsGain = rcsIntensity > 0.01 ? Math.min(0.4, rcsIntensity * 0.32) : 0;
@@ -530,34 +544,72 @@ export class AudioEngine {
     if (!this.ctx || !this.masterGain || this.muted) return;
     const now = this.ctx.currentTime;
 
-    this.playSfx('screen_power_on', { volume: 0.92 });
-    this.playSfx('nostromo_boot_sequence', { volume: 0.85, pitch: 0.96 });
-    this.playSfx('tape_drive_servo', { volume: 0.68, pitch: 0.94 });
+    this.playSfx('screen_power_on', { volume: 0.9, pitch: 0.88 });
+    this.playLowComputerBuffer('nostromo_boot_sequence', 0.72, 0.68);
+    this.playLowComputerBuffer('tape_drive_servo', 0.65, 0.82);
 
-    // Authentic 1979 Jim Shields-style rhythmic FSK analog mainframe awakening bleeps
-    this.synth1979MainframeCascade(now + 0.18);
+    // Low-register baritone 1979 mainframe telemetry cascade
+    this.synth1979MainframeCascade(now + 0.24, 9, 0.36);
   }
 
   /**
-   * Plays subtle 1979 Nostromo computer thinking / data-bus telemetry chirps
-   * during terminal transitions, diagnostic lines, and ambient cockpit background.
+   * Plays lower-pitched, warm, infrequent 1979 Nostromo computer thinking tones.
    */
-  public playAlienComputerActivity(intensity = 0.55): void {
+  public playAlienComputerActivity(intensity = 0.45): void {
     if (!this.ctx || !this.masterGain || this.muted) return;
-    if (Math.random() < 0.65 && this.buffers.has('computer_telemetry_chirp')) {
-      this.playSfx('computer_telemetry_chirp', {
-        volume: intensity,
-        pitch: 0.88 + Math.random() * 0.22,
-        pan: (Math.random() - 0.5) * 0.4,
-      });
+    if (this.buffers.has('computer_telemetry_chirp')) {
+      this.playLowComputerBuffer(
+        'computer_telemetry_chirp',
+        intensity * 0.85,
+        0.62 + Math.random() * 0.14
+      );
     } else if (this.buffers.has('tape_drive_servo')) {
-      this.playSfx('tape_drive_servo', {
-        volume: intensity * 0.72,
-        pitch: 0.92 + Math.random() * 0.16,
-        pan: (Math.random() - 0.5) * 0.35,
+      this.playLowComputerBuffer(
+        'tape_drive_servo',
+        intensity * 0.7,
+        0.78 + Math.random() * 0.12
+      );
+    } else {
+      this.synth1979MainframeCascade(this.ctx.currentTime, 3, intensity * 0.42);
+    }
+  }
+
+  private playLowComputerBuffer(id: string, volume: number, pitch: number): void {
+    const ctx = this.ctx;
+    const buf = this.buffers.get(id);
+    if (!ctx || !buf || !this.masterGain) return;
+
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = pitch;
+
+    // Warm 780Hz lowpass so computer bleeps are deep, dark, and never piercing
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 780;
+    lp.Q.value = 0.7;
+
+    const g = ctx.createGain();
+    g.gain.value = 0.68 * volume;
+
+    src.connect(lp);
+    lp.connect(g);
+    g.connect(this.masterGain);
+    src.start(ctx.currentTime);
+  }
+
+  /**
+   * Satisfying heavy mechanical / industrial cockpit latch engaging sound for buttons & switches.
+   */
+  public playButtonLatchLock(pitch = 0.94, volume = 0.95): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    if (this.buffers.has('button_latch_lock')) {
+      this.playSfx('button_latch_lock', {
+        pitch: pitch * (0.96 + Math.random() * 0.08),
+        volume,
       });
     } else {
-      this.synth1979MainframeCascade(this.ctx.currentTime, 4, intensity * 0.5);
+      this.playSfx('keypress_return', { pitch: pitch * 0.85, volume });
     }
   }
 
@@ -652,7 +704,12 @@ export class AudioEngine {
       gain.connect(this.masterGain);
       // Start near transient onset for crisp response on snappy mechanical switches
       const startOffset =
-        lookupKey === 'keypress_return' || lookupKey === 'screen_power_on'
+        lookupKey === 'button_latch_lock' ||
+        lookupKey === 'keypress_return' ||
+        lookupKey === 'screen_power_on' ||
+        lookupKey === 'thruster_ignite' ||
+        lookupKey === 'landing_hard_thud' ||
+        lookupKey === 'landing_soft_mech'
           ? onset
           : 0;
       src.start(now, startOffset);
@@ -666,11 +723,15 @@ export class AudioEngine {
       case 'nostromo_boot_sequence':
       case 'computer_telemetry_chirp':
       case 'tape_drive_servo':
-        this.synth1979MainframeCascade(now, 8, volume * 0.5);
+        this.synth1979MainframeCascade(now, 5, volume * 0.4);
         break;
+      case 'button_latch_lock':
       case 'keypress_return':
       case 'ui_toggle_switch':
-        this.synthToggleSwitch(now, pitch, volume);
+        this.synthToggleSwitch(now, pitch * 0.8, volume);
+        break;
+      case 'thruster_ignite':
+        this.synthLandingThud(now, 0.7, volume * 0.6);
         break;
       case 'lidar_ping':
         this.synthLidarPing(now, pitch, pan, volume);
@@ -678,6 +739,8 @@ export class AudioEngine {
       case 'proximity_klaxon':
         this.synthProximityKlaxon(now, pitch, volume);
         break;
+      case 'landing_soft_mech':
+      case 'landing_hard_thud':
       case 'landing_strut_thud':
         this.synthLandingThud(now, pitch, volume);
         break;
@@ -717,30 +780,30 @@ export class AudioEngine {
    * Synthesizes muted 1979 ALIEN ("Mother" / Mn7A1vfs8m0) rhythmic analog mainframe
    * telemetry bleeps routed through the warm band-limited cockpit speaker chain.
    */
-  private synth1979MainframeCascade(t: number, steps = 14, gainScale = 0.42): void {
+  private synth1979MainframeCascade(t: number, steps = 9, gainScale = 0.36): void {
     const ctx = this.ctx!;
     const dest = this.intercomInput ?? this.masterGain!;
-    // Classic 1979 cassette-futurism pentatonic/quartal telemetry register frequencies
-    const registers = [440, 587.3, 659.2, 784.0, 987.8, 523.2, 880, 392.0];
+    // Deep low-register baritone 1979 mainframe telemetry tones (146Hz - 329Hz)
+    const registers = [164.8, 220.0, 246.9, 196.0, 293.7, 146.8, 261.6, 329.6];
 
     let cursor = t;
     for (let i = 0; i < steps; i++) {
-      const dur = i % 4 === 3 ? 0.085 : 0.042;
-      const gap = i % 5 === 4 ? 0.11 : 0.052;
+      const dur = i % 3 === 2 ? 0.11 : 0.065;
+      const gap = i % 4 === 3 ? 0.16 : 0.085;
       const freq = registers[(i * 3 + Math.floor(i / 2)) % registers.length];
 
       const osc = ctx.createOscillator();
       const lp = ctx.createBiquadFilter();
       const g = ctx.createGain();
 
-      osc.type = i % 3 === 0 ? 'triangle' : 'sine';
+      osc.type = 'triangle';
       osc.frequency.setValueAtTime(freq, cursor);
 
       lp.type = 'lowpass';
-      lp.frequency.value = 1650;
+      lp.frequency.value = 680;
 
       g.gain.setValueAtTime(0.0001, cursor);
-      g.gain.linearRampToValueAtTime(0.11 * gainScale, cursor + 0.006);
+      g.gain.linearRampToValueAtTime(0.11 * gainScale, cursor + 0.008);
       g.gain.exponentialRampToValueAtTime(0.0001, cursor + dur);
 
       osc.connect(lp);
@@ -815,7 +878,7 @@ export class AudioEngine {
   private synthIntercomPreChime(t: number): void {
     const ctx = this.ctx!;
     const dest = this.intercomInput!;
-    const freqs = [784, 1046.5];
+    const freqs = [440, 554.37];
     freqs.forEach((f, idx) => {
       const osc = ctx.createOscillator();
       const g = ctx.createGain();

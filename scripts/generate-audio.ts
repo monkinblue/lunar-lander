@@ -57,10 +57,10 @@ const SOUND_ASSETS: SoundGenAsset[] = [
   {
     filename: 'thruster_main_loop.mp3',
     prompt:
-      'Heavy, throaty industrial rocket engine rumble with analog tape saturation.',
+      'Deep thunderous SpaceX Starship Raptor rocket landing burn, massive roaring liquid methane flame exhaust, chest-rattling low sub-bass rumble and crackling Mach plume, warm HD recording, no high-pitched whine.',
     loop: true,
     durationSeconds: 8,
-    promptInfluence: 0.5,
+    promptInfluence: 0.68,
   },
   {
     filename: 'thruster_rcs_loop.mp3',
@@ -127,6 +127,22 @@ const SOUND_ASSETS: SoundGenAsset[] = [
     promptInfluence: 0.72,
   },
   {
+    filename: 'thruster_ignite.mp3',
+    prompt:
+      'Deep powerful SpaceX rocket engine ignition whoosh and low-end combustion thump, heavy liquid propellant flame light-off.',
+    loop: false,
+    durationSeconds: 1.4,
+    promptInfluence: 0.65,
+  },
+  {
+    filename: 'button_latch_lock.mp3',
+    prompt:
+      'Heavy solid industrial steel cockpit latch engaging, chunky mechanical lock clunk and weighty damped metal bolt click.',
+    loop: false,
+    durationSeconds: 0.9,
+    promptInfluence: 0.7,
+  },
+  {
     filename: 'keypress_return.mp3',
     prompt:
       'Heavy mechanical terminal carriage-return and metal cockpit toggle switch snap.',
@@ -150,6 +166,22 @@ const SOUND_ASSETS: SoundGenAsset[] = [
     promptInfluence: 0.5,
   },
   {
+    filename: 'landing_soft_mech.mp3',
+    prompt:
+      'High-definition realistic spacecraft soft touchdown, heavy pneumatic hydraulic landing struts compressing smoothly, mechanical magnetic pad clamps locking shut, brief residual gas vent.',
+    loop: false,
+    durationSeconds: 2.5,
+    promptInfluence: 0.68,
+  },
+  {
+    filename: 'landing_hard_thud.mp3',
+    prompt:
+      'Crisp high-definition heavy spacecraft hard landing thud, violent solid metal landing gear slam onto pad, deep structural shock thump and hydraulic groan.',
+    loop: false,
+    durationSeconds: 2.2,
+    promptInfluence: 0.7,
+  },
+  {
     filename: 'landing_strut_thud.mp3',
     prompt:
       'Heavy hydraulic shock compression and metallic landing pad lock clang.',
@@ -160,10 +192,10 @@ const SOUND_ASSETS: SoundGenAsset[] = [
   {
     filename: 'hull_explosion.mp3',
     prompt:
-      'Violent metallic spacecraft hull crush, electrical arc short, and muffled decompression roar.',
+      'High-definition realistic cinematic spacecraft explosion, violent pressurized hull rupture, thunderous fuel tank detonation shockwave, tearing metal debris, deep sub-bass boom.',
     loop: false,
-    durationSeconds: 4.0,
-    promptInfluence: 0.5,
+    durationSeconds: 4.5,
+    promptInfluence: 0.7,
   },
 ];
 
@@ -186,7 +218,15 @@ const VOICE_CALLOUTS: VoiceCalloutAsset[] = [
   },
   {
     filename: 'voice_proximity.mp3',
-    text: 'Terrain proximity warning. Check descent rate.',
+    text: 'Descent rate.',
+  },
+  {
+    filename: 'voice_pull_up.mp3',
+    text: 'Pull up.',
+  },
+  {
+    filename: 'voice_bank_angle.mp3',
+    text: 'Bank angle.',
   },
   {
     filename: 'voice_touchdown.mp3',

@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "generatedAt": "2026-11-18T03:51:21.107Z",
+  "generatedAt": "2026-11-18T04:12:38.572Z",
   "voiceId": "Xb7hH8MSUJpSbSDYk0k2",
   "assets": {
     "ambient_crt_buzz": {
@@ -53,6 +53,16 @@
       "category": "sfx",
       "bytes": 13835
     },
+    "thruster_ignite": {
+      "path": "/audio/thruster_ignite.mp3",
+      "category": "sfx",
+      "bytes": 23030
+    },
+    "button_latch_lock": {
+      "path": "/audio/button_latch_lock.mp3",
+      "category": "sfx",
+      "bytes": 15089
+    },
     "keypress_return": {
       "path": "/audio/keypress_return.mp3",
       "category": "sfx",
@@ -68,6 +78,16 @@
       "category": "sfx",
       "bytes": 24702
     },
+    "landing_soft_mech": {
+      "path": "/audio/landing_soft_mech.mp3",
+      "category": "sfx",
+      "bytes": 40585
+    },
+    "landing_hard_thud": {
+      "path": "/audio/landing_hard_thud.mp3",
+      "category": "sfx",
+      "bytes": 36405
+    },
     "landing_strut_thud": {
       "path": "/audio/landing_strut_thud.mp3",
       "category": "sfx",
@@ -76,7 +96,7 @@
     "hull_explosion": {
       "path": "/audio/hull_explosion.mp3",
       "category": "sfx",
-      "bytes": 65244
+      "bytes": 72767
     },
     "voice_boot": {
       "path": "/audio/voice_boot.mp3",
@@ -101,7 +121,17 @@
     "voice_proximity": {
       "path": "/audio/voice_proximity.mp3",
       "category": "voice",
-      "bytes": 51452
+      "bytes": 20941
+    },
+    "voice_pull_up": {
+      "path": "/audio/voice_pull_up.mp3",
+      "category": "voice",
+      "bytes": 13835
+    },
+    "voice_bank_angle": {
+      "path": "/audio/voice_bank_angle.mp3",
+      "category": "voice",
+      "bytes": 18015
     },
     "voice_touchdown": {
       "path": "/audio/voice_touchdown.mp3",

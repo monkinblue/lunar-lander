@@ -1,10 +1,10 @@
 export const COLORS = {
-  BG_DEEP: '#020804',
-  GREEN_PRIMARY: '#44FF77',
-  GREEN_BRIGHT: '#ACFFC6',
-  GREEN_MID: '#22A84B',
-  GREEN_DIM: '#0D3B1E',
-  GREEN_FAINT: '#072211',
+  BG_DEEP: '#08130C',
+  GREEN_PRIMARY: '#36C95E',
+  GREEN_BRIGHT: '#7BE098',
+  GREEN_MID: '#23823D',
+  GREEN_DIM: '#123A1F',
+  GREEN_FAINT: '#0B2313',
   AMBER_CAUTION: '#FF6600',
   AMBER_BRIGHT: '#FF8C24',
   AMBER_DIM: '#542000',
@@ -50,18 +50,18 @@ export const PHYSICS = {
   STRUT_SPRING_K: 42000,
   STRUT_DAMPER_C: 9200,
 
-  // Sensors & LIDAR
-  CAPACITOR_RECHARGE_PER_S: 16.5,
-  OMNI_LIDAR_COST: 42,
-  OMNI_LIDAR_RANGE_M: 175,
-  OMNI_LIDAR_SPEED_M_S: 135,
-  DIR_LIDAR_COST: 16,
-  DIR_LIDAR_RANGE_M: 255,
-  DIR_LIDAR_SPEED_M_S: 185,
-  DIR_LIDAR_HALF_ARC: 0.33, // ~38 deg cone
-  SPOTLIGHT_RANGE_M: 135,
-  SPOTLIGHT_HALF_ARC: 0.24,
-  LIDAR_DECAY_SECONDS: 4.0, // Phosphor terrain decay duration
+  // Sensors & Discrete Tactical Radar Cell Charges
+  CAPACITOR_RECHARGE_PER_S: 7.5, // Slow emergency-only cell regen when 0 charges remain
+  OMNI_LIDAR_COST: 1,
+  OMNI_LIDAR_RANGE_M: 215,
+  OMNI_LIDAR_SPEED_M_S: 165,
+  DIR_LIDAR_COST: 1,
+  DIR_LIDAR_RANGE_M: 285,
+  DIR_LIDAR_SPEED_M_S: 215,
+  DIR_LIDAR_HALF_ARC: 0.36, // ~41 deg focused long-range cone
+  SPOTLIGHT_RANGE_M: 42, // Short-range nose inspection beam so caves genuinely require radar
+  SPOTLIGHT_HALF_ARC: 0.17,
+  LIDAR_DECAY_SECONDS: 1.75, // Fast phosphor fade so radar sweeps must be timed tactically
 
   // Approach & Landing Thresholds
   APPROACH_PROXIMITY_M: 80,
@@ -86,10 +86,12 @@ export const PHYSICS = {
 
 export const VOICE_TRANSCRIPTS: Record<string, string> = {
   voice_boot: 'INTERFACE 2037 READY. ORBITAL DESCENT TELEMETRY ONLINE.',
-  voice_wind: 'CAUTION. SEVERE ATMOSPHERIC WIND SHEAR DETECTED.',
-  voice_interference: 'WARNING. ELECTROMAGNETIC INTERFERENCE. ENGAGE ACTIVE RADAR.',
-  voice_fuel_low: 'CAUTION. PROPELLANT RESERVES AT TWENTY-FIVE PERCENT.',
-  voice_proximity: 'TERRAIN PROXIMITY WARNING. CHECK DESCENT RATE.',
-  voice_touchdown: 'CONTACT LIGHT. ENGINE STOP. TOUCHDOWN CONFIRMED.',
-  voice_hull_breach: 'CRITICAL HULL BREACH. DESCENT SIGNAL LOST.',
+  voice_wind: 'WIND SHEAR.',
+  voice_interference: 'ELECTROMAGNETIC INTERFERENCE. ENGAGE RADAR.',
+  voice_fuel_low: 'CAUTION. PROPELLANT TWENTY-FIVE PERCENT.',
+  voice_proximity: 'DESCENT RATE.',
+  voice_pull_up: 'PULL UP.',
+  voice_bank_angle: 'BANK ANGLE.',
+  voice_touchdown: 'CONTACT LIGHT. ENGINE STOP.',
+  voice_hull_breach: 'CRITICAL HULL BREACH. SIGNAL LOST.',
 };

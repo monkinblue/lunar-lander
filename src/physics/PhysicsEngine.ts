@@ -119,6 +119,8 @@ export class PhysicsEngine {
       rcsDamaged: false,
       tookSectorDamage: false,
       sensorCapacitor: 100,
+      radarCharges: sector.initialRadarCharges,
+      maxRadarCharges: sector.initialRadarCharges,
       spotlightAngle: -Math.PI * 0.5,
       spotlightRange: PHYSICS.SPOTLIGHT_RANGE_M,
       spotlightHit: null,
@@ -155,8 +157,11 @@ export class PhysicsEngine {
   }
 
   public triggerOmniLidar(lander: LanderState): boolean {
-    if (!lander.alive || lander.sensorCapacitor < PHYSICS.OMNI_LIDAR_COST) return false;
-    lander.sensorCapacitor = Math.max(0, lander.sensorCapacitor - PHYSICS.OMNI_LIDAR_COST);
+    if (!lander.alive || lander.radarCharges < PHYSICS.OMNI_LIDAR_COST) return false;
+    lander.radarCharges = Math.max(0, lander.radarCharges - PHYSICS.OMNI_LIDAR_COST);
+    if (lander.radarCharges === 0) {
+      lander.sensorCapacitor = 0;
+    }
     this.lidarWaves.push({
       origin: { ...lander.pos },
       radius: 2,
@@ -171,8 +176,11 @@ export class PhysicsEngine {
   }
 
   public triggerDirectionalLidar(lander: LanderState): boolean {
-    if (!lander.alive || lander.sensorCapacitor < PHYSICS.DIR_LIDAR_COST) return false;
-    lander.sensorCapacitor = Math.max(0, lander.sensorCapacitor - PHYSICS.DIR_LIDAR_COST);
+    if (!lander.alive || lander.radarCharges < PHYSICS.DIR_LIDAR_COST) return false;
+    lander.radarCharges = Math.max(0, lander.radarCharges - PHYSICS.DIR_LIDAR_COST);
+    if (lander.radarCharges === 0) {
+      lander.sensorCapacitor = 0;
+    }
     this.lidarWaves.push({
       origin: { ...lander.pos },
       radius: 2,
@@ -278,8 +286,16 @@ export class PhysicsEngine {
       return;
     }
 
-    // Recharge sensor capacitor
-    lander.sensorCapacitor = Math.min(100, lander.sensorCapacitor + PHYSICS.CAPACITOR_RECHARGE_PER_S * dt);
+    // Emergency backup cell generator ONLY when 0 radar charges remain (~13.3s for 1 reserve cell)
+    if (lander.radarCharges <= 0) {
+      lander.sensorCapacitor = Math.min(100, lander.sensorCapacitor + PHYSICS.CAPACITOR_RECHARGE_PER_S * dt);
+      if (lander.sensorCapacitor >= 100) {
+        lander.radarCharges = 1;
+        lander.sensorCapacitor = 100;
+      }
+    } else {
+      lander.sensorCapacitor = 100;
+    }
 
     // Aim steerable nose spotlight toward mouse world target
     const aimDx = input.aimWorldPos.x - lander.pos.x;
@@ -706,7 +722,12 @@ export class PhysicsEngine {
         } else {
           lander.refuelingActive = false;
         }
-        // Gradual field maintenance on depot
+        // Gradual field maintenance & radar cell reload on depot
+        if (lander.radarCharges < lander.maxRadarCharges) {
+          if (Math.floor(lander.groundedTime * 2) > Math.floor((lander.groundedTime - dt) * 2)) {
+            lander.radarCharges = Math.min(lander.maxRadarCharges, lander.radarCharges + 1);
+          }
+        }
         if (lander.groundedTime > 1.2) {
           lander.strutDamaged = false;
           lander.rcsDamaged = false;
@@ -843,17 +864,17 @@ export class PhysicsEngine {
           hit = true;
         }
 
-        // Subtle spotlight illumination on rock segments inside the beam cone
+        // Short-range nose headlight only reveals rock right at the beam tip (never replaces radar!)
         if (illum) {
           const mx = (a.x + b.x) * 0.5 - nose.x;
           const my = (a.y + b.y) * 0.5 - nose.y;
           const distSq = mx * mx + my * my;
-          if (distSq < lander.spotlightRange * lander.spotlightRange) {
+          if (distSq < 26 * 26) {
             const ang = Math.atan2(my, mx);
             const diff = Math.abs(normalizeAngle(ang - lander.spotlightAngle));
             if (diff <= PHYSICS.SPOTLIGHT_HALF_ARC) {
               const dist = Math.sqrt(distSq);
-              const spotBoost = (1 - dist / lander.spotlightRange) * (1 - diff / PHYSICS.SPOTLIGHT_HALF_ARC) * 0.55;
+              const spotBoost = (1 - dist / 26) * (1 - diff / PHYSICS.SPOTLIGHT_HALF_ARC) * 0.28;
               if (spotBoost > illum[i]) {
                 illum[i] = spotBoost;
               }
