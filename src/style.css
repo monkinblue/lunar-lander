@@ -1,0 +1,38 @@
+:root {
+  --crt-bg: #030A05;
+  --p39-green: #33FF66;
+  --p39-dim: #135229;
+  --telemetry-amber: #FFB000;
+  --klaxon-red: #FF3B1F;
+  --chassis-dark: #0A0D0B;
+}
+
+.console-shell {
+  position: relative;
+  width: 100vw;
+  height: 100dvh;
+  background-color: var(--chassis-dark);
+  overflow: hidden;
+  contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 100dvh;
+}
+
+#crt-webgl-canvas,
+#bezel-ui-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#crt-webgl-canvas {
+  z-index: 1;
+  background-color: var(--crt-bg);
+}
+
+#bezel-ui-canvas {
+  z-index: 2;
+  pointer-events: none;
+}

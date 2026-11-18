@@ -1,0 +1,95 @@
+export const COLORS = {
+  BG_DEEP: '#020804',
+  GREEN_PRIMARY: '#44FF77',
+  GREEN_BRIGHT: '#ACFFC6',
+  GREEN_MID: '#22A84B',
+  GREEN_DIM: '#0D3B1E',
+  GREEN_FAINT: '#072211',
+  AMBER_CAUTION: '#FFB000',
+  AMBER_BRIGHT: '#FFD257',
+  AMBER_DIM: '#6B4800',
+  RED_KLAXON: '#FF3B1F',
+  RED_DIM: '#6B160A',
+  CHASSIS_OUTER: '#0A0D0B',
+  CHASSIS_PANEL: '#111614',
+  CHASSIS_EDGE: '#242F28',
+  CHASSIS_TEXT: '#8EA896',
+} as const;
+
+export const PHYSICS = {
+  FIXED_DT: 1 / 60,
+  MAX_FRAME_DT: 0.1,
+
+  // Narcissus / Cheyenne Drop-Shuttle Mass & Propulsion (SI units: kg, N, m, s)
+  DRY_MASS_KG: 950,
+  MAIN_THRUST_N: 5800,
+  OVERDRIVE_MULTIPLIER: 1.35, // Shift + W emergency burn
+  MAIN_BURN_RATE_KG_S: 8.2, // kg/s at 100% throttle
+  OVERDRIVE_BURN_PENALTY: 1.65,
+  THROTTLE_SPOOL_UP_RATE: 4.2, // /s
+  THROTTLE_SPOOL_DOWN_RATE: 6.0, // /s
+
+  // Attitude & RCS
+  RCS_TORQUE_NM: 6200,
+  RCS_BURN_RATE_KG_S: 0.95,
+  SAS_DAMPING_TORQUE: 3400,
+  SAS_BURN_RATE_KG_S: 0.35,
+
+  // S / Down Retro-Stabilizer Assist
+  RETRO_ANGULAR_DAMP: 7200,
+  RETRO_UPRIGHT_TORQUE: 5200,
+  RETRO_LATERAL_THRUST_N: 2100,
+  RETRO_BURN_RATE_KG_S: 3.8,
+
+  // Shuttle Geometry (meters)
+  HULL_RADIUS_M: 2.6,
+  HULL_TOP_Y: 3.3,
+  STRUT_SPAN_HALF_X: 3.6, // 7.2m total footpad span
+  STRUT_REST_BOTTOM_Y: -3.2, // relative to center of mass
+  STRUT_MAX_TRAVEL_M: 0.95, // spring compression travel
+  STRUT_SPRING_K: 42000,
+  STRUT_DAMPER_C: 9200,
+
+  // Sensors & LIDAR
+  CAPACITOR_RECHARGE_PER_S: 16.5,
+  OMNI_LIDAR_COST: 42,
+  OMNI_LIDAR_RANGE_M: 175,
+  OMNI_LIDAR_SPEED_M_S: 135,
+  DIR_LIDAR_COST: 16,
+  DIR_LIDAR_RANGE_M: 255,
+  DIR_LIDAR_SPEED_M_S: 185,
+  DIR_LIDAR_HALF_ARC: 0.33, // ~38 deg cone
+  SPOTLIGHT_RANGE_M: 135,
+  SPOTLIGHT_HALF_ARC: 0.24,
+  LIDAR_DECAY_SECONDS: 4.0, // Phosphor terrain decay duration
+
+  // Approach & Landing Thresholds
+  APPROACH_PROXIMITY_M: 80,
+  SAFE_VS_MAX: 2.2,
+  SAFE_HS_MAX: 1.2,
+  SAFE_ANGLE_DEG: 7.0,
+  KISS_VS_MAX: 0.8,
+  KISS_HS_MAX: 0.4,
+  SURVIVAL_VS_MAX: 3.8,
+  SURVIVAL_HS_MAX: 2.1,
+  SURVIVAL_ANGLE_DEG: 13.5,
+
+  // Refuel Depot Rate
+  DEPOT_REFUEL_RATE_KG_S: 32,
+
+  // Scoring Constants
+  BASE_PAD_VALUE: 1000,
+  FUEL_SCORE_MULTIPLIER: 15,
+  MAX_KISS_BONUS: 1500,
+  NO_DAMAGE_BONUS: 1000,
+} as const;
+
+export const VOICE_TRANSCRIPTS: Record<string, string> = {
+  voice_boot: 'INTERFACE 2037 READY. ORBITAL DESCENT TELEMETRY ONLINE.',
+  voice_wind: 'CAUTION. SEVERE ATMOSPHERIC WIND SHEAR DETECTED.',
+  voice_interference: 'WARNING. ELECTROMAGNETIC INTERFERENCE. ENGAGE ACTIVE RADAR.',
+  voice_fuel_low: 'CAUTION. PROPELLANT RESERVES AT TWENTY-FIVE PERCENT.',
+  voice_proximity: 'TERRAIN PROXIMITY WARNING. CHECK DESCENT RATE.',
+  voice_touchdown: 'CONTACT LIGHT. ENGINE STOP. TOUCHDOWN CONFIRMED.',
+  voice_hull_breach: 'CRITICAL HULL BREACH. DESCENT SIGNAL LOST.',
+};

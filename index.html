@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="USCSS Nostromo / MU-TH-UR 6000 retro-futuristic vector Lunar Lander descent simulation.">
+  <meta name="theme-color" content="#030A05">
+  <title>INTERFACE 2037 // USCSS NOSTROMO DESCENT TELEMETRY</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+
+  <!-- Early TLS & DNS handshakes for 1979 terminal typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Share+Tech+Mono&display=swap"
+    rel="stylesheet"
+  >
+
+  <!-- Inline critical styles to prevent flash of unstyled background -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #030A05;
+      color: #33FF66;
+      font-family: 'Share Tech Mono', 'JetBrains Mono', monospace;
+      overflow: hidden;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+  </style>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <main id="console-shell" class="console-shell">
+    <h1 class="sr-only">INTERFACE 2037 — Weyland-Yutani USCSS Nostromo Orbital Descent Console</h1>
+    <div id="sr-telemetry-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
+    <!-- Stage 2: Full-screen / CRT viewport WebGL curved phosphor post-processor -->
+    <canvas id="crt-webgl-canvas" aria-label="Nostromo CRT Vector Descent Monitor">
+      USCSS Nostromo Descent Telemetry requires HTML5 Canvas and WebGL support.
+    </canvas>
+
+    <!-- Tactile Hardware Bezel Canvas framing the recessed curved CRT monitor -->
+    <canvas id="bezel-ui-canvas" aria-hidden="true"></canvas>
+
+    <!-- Keyboard-accessible mirror buttons for hardware bezel switches (WCAG Audio & Control Parity) -->
+    <nav class="sr-only" aria-label="Console Hardware Switches">
+      <button type="button" id="a11y-sas-toggle">Toggle SAS Attitude Dampener</button>
+      <button type="button" id="a11y-zoom-toggle">Toggle Auto-Zoom Approach</button>
+      <button type="button" id="a11y-crt-step">Cycle CRT Glass and Bloom Intensity</button>
+      <button type="button" id="a11y-mute-toggle">Toggle Intercom and Audio Bus Mute</button>
+      <button type="button" id="a11y-logs-toggle">Toggle MU-TH-UR 6000 Flight Logs</button>
+    </nav>
+  </main>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

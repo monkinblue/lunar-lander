@@ -1,0 +1,97 @@
+{
+  "version": 2,
+  "generatedAt": "2026-11-18T03:09:59.602Z",
+  "voiceId": "Xb7hH8MSUJpSbSDYk0k2",
+  "assets": {
+    "ambient_crt_buzz": {
+      "path": "/audio/ambient_crt_buzz.mp3",
+      "category": "loop",
+      "bytes": 160957
+    },
+    "thruster_main_loop": {
+      "path": "/audio/thruster_main_loop.mp3",
+      "category": "loop",
+      "bytes": 129192
+    },
+    "thruster_rcs_loop": {
+      "path": "/audio/thruster_rcs_loop.mp3",
+      "category": "loop",
+      "bytes": 81127
+    },
+    "lv426_wind_loop": {
+      "path": "/audio/lv426_wind_loop.mp3",
+      "category": "loop",
+      "bytes": 160957
+    },
+    "screen_power_on": {
+      "path": "/audio/screen_power_on.mp3",
+      "category": "sfx",
+      "bytes": 45182
+    },
+    "ui_keyclick": {
+      "path": "/audio/ui_keyclick.mp3",
+      "category": "sfx",
+      "bytes": 15089
+    },
+    "keypress_return": {
+      "path": "/audio/keypress_return.mp3",
+      "category": "sfx",
+      "bytes": 17179
+    },
+    "lidar_ping": {
+      "path": "/audio/lidar_ping.mp3",
+      "category": "sfx",
+      "bytes": 48944
+    },
+    "proximity_klaxon": {
+      "path": "/audio/proximity_klaxon.mp3",
+      "category": "sfx",
+      "bytes": 24702
+    },
+    "landing_strut_thud": {
+      "path": "/audio/landing_strut_thud.mp3",
+      "category": "sfx",
+      "bytes": 29300
+    },
+    "hull_explosion": {
+      "path": "/audio/hull_explosion.mp3",
+      "category": "sfx",
+      "bytes": 65244
+    },
+    "voice_boot": {
+      "path": "/audio/voice_boot.mp3",
+      "category": "voice",
+      "bytes": 86560
+    },
+    "voice_wind": {
+      "path": "/audio/voice_wind.mp3",
+      "category": "voice",
+      "bytes": 51452
+    },
+    "voice_interference": {
+      "path": "/audio/voice_interference.mp3",
+      "category": "voice",
+      "bytes": 69424
+    },
+    "voice_fuel_low": {
+      "path": "/audio/voice_fuel_low.mp3",
+      "category": "voice",
+      "bytes": 58139
+    },
+    "voice_proximity": {
+      "path": "/audio/voice_proximity.mp3",
+      "category": "voice",
+      "bytes": 51452
+    },
+    "voice_touchdown": {
+      "path": "/audio/voice_touchdown.mp3",
+      "category": "voice",
+      "bytes": 54377
+    },
+    "voice_hull_breach": {
+      "path": "/audio/voice_hull_breach.mp3",
+      "category": "voice",
+      "bytes": 45600
+    }
+  }
+}
