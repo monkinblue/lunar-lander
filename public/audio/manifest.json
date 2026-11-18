@@ -1,12 +1,17 @@
 {
   "version": 2,
-  "generatedAt": "2026-11-18T04:12:38.572Z",
+  "generatedAt": "2026-11-18T04:41:50.627Z",
   "voiceId": "Xb7hH8MSUJpSbSDYk0k2",
   "assets": {
     "ambient_crt_buzz": {
       "path": "/audio/ambient_crt_buzz.mp3",
       "category": "loop",
       "bytes": 160957
+    },
+    "alien_eerie_ambience": {
+      "path": "/audio/alien_eerie_ambience.mp3",
+      "category": "loop",
+      "bytes": 193140
     },
     "thruster_main_loop": {
       "path": "/audio/thruster_main_loop.mp3",
@@ -73,6 +78,11 @@
       "category": "sfx",
       "bytes": 48944
     },
+    "alien_motion_ping": {
+      "path": "/audio/alien_motion_ping.mp3",
+      "category": "sfx",
+      "bytes": 15089
+    },
     "proximity_klaxon": {
       "path": "/audio/proximity_klaxon.mp3",
       "category": "sfx",
@@ -130,6 +140,26 @@
     },
     "voice_bank_angle": {
       "path": "/audio/voice_bank_angle.mp3",
+      "category": "voice",
+      "bytes": 18015
+    },
+    "voice_lateral_drift": {
+      "path": "/audio/voice_lateral_drift.mp3",
+      "category": "voice",
+      "bytes": 22612
+    },
+    "voice_minimums": {
+      "path": "/audio/voice_minimums.mp3",
+      "category": "voice",
+      "bytes": 17597
+    },
+    "voice_obstacle": {
+      "path": "/audio/voice_obstacle.mp3",
+      "category": "voice",
+      "bytes": 16761
+    },
+    "voice_wind_shear_short": {
+      "path": "/audio/voice_wind_shear_short.mp3",
       "category": "voice",
       "bytes": 18015
     },

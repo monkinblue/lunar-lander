@@ -85,7 +85,7 @@ export class WorldRenderer {
     // 9. Beefed-Up Skeletal Drop-Shuttle OR Breakup Debris + Shockwaves
     if (lander.alive) {
       this.drawDropShuttle(ctx, cam, lander, renderPos, renderAngle, timeSec);
-      this.drawFlightVelocityReticle(ctx, cam, lander, renderPos);
+      this.drawFlightVelocityReticle(ctx, cam, sector, physics, lander, renderPos);
     } else {
       this.drawDebrisAndShockwaves(ctx, cam, physics);
     }
@@ -170,7 +170,7 @@ export class WorldRenderer {
           const left = this.worldToScreen(cam, 0, band.minY);
           const right = this.worldToScreen(cam, sector.worldWidth, band.minY);
           if (left.y > 40 && left.y < cam.heightPx - 40) {
-            ctx.strokeStyle = 'rgba(255, 102, 0, 0.32)';
+            ctx.strokeStyle = 'rgba(255, 140, 0, 0.34)';
             ctx.lineWidth = 1.4;
             ctx.setLineDash([8, 10]);
             ctx.beginPath();
@@ -179,7 +179,7 @@ export class WorldRenderer {
             ctx.stroke();
             ctx.setLineDash([]);
 
-            ctx.fillStyle = 'rgba(255, 102, 0, 0.72)';
+            ctx.fillStyle = 'rgba(255, 140, 0, 0.74)';
             const arrow = band.baseVx > 0 ? '>>>' : '<<<';
             ctx.fillText(`SHEAR ${band.minY}M // ${band.label} ${arrow}`, 24, left.y - 6);
           }
@@ -202,8 +202,8 @@ export class WorldRenderer {
       const shimmer = 0.32 + 0.22 * Math.sin(timeSec * 5 + d.pos.x);
       ctx.strokeStyle =
         windMag > 6
-          ? `rgba(255, 102, 0, ${(shimmer * 0.92).toFixed(2)})`
-          : `rgba(68, 255, 119, ${(shimmer * 0.72).toFixed(2)})`;
+          ? `rgba(255, 140, 0, ${(shimmer * 0.92).toFixed(2)})`
+          : `rgba(59, 224, 104, ${(shimmer * 0.72).toFixed(2)})`;
       ctx.lineWidth = 1.6;
       ctx.beginPath();
       ctx.moveTo(sp.x, sp.y);
@@ -248,7 +248,7 @@ export class WorldRenderer {
         const alpha = Math.sin(prog * Math.PI) * 0.85;
         const wSpan = halfWpx * (0.48 + prog * 0.45);
 
-        ctx.strokeStyle = `rgba(255, 102, 0, ${alpha.toFixed(3)})`;
+        ctx.strokeStyle = `rgba(255, 140, 0, ${alpha.toFixed(3)})`;
         ctx.lineWidth = 2.0;
         ctx.beginPath();
         ctx.moveTo(p.x - wSpan, p.y + 6);
@@ -257,7 +257,7 @@ export class WorldRenderer {
         ctx.stroke();
       }
 
-      ctx.strokeStyle = 'rgba(255, 102, 0, 0.28)';
+      ctx.strokeStyle = 'rgba(255, 140, 0, 0.28)';
       ctx.lineWidth = 1.2;
       ctx.setLineDash([4, 7]);
       ctx.beginPath();
@@ -731,8 +731,8 @@ export class WorldRenderer {
         const cy = pL.y - 38 + phase * 22;
         const cAlpha = Math.sin(phase * Math.PI) * 0.9;
         ctx.strokeStyle = isDepot
-          ? `rgba(68, 255, 119, ${cAlpha.toFixed(2)})`
-          : `rgba(255, 102, 0, ${cAlpha.toFixed(2)})`;
+          ? `rgba(59, 224, 104, ${cAlpha.toFixed(2)})`
+          : `rgba(255, 140, 0, ${cAlpha.toFixed(2)})`;
         ctx.lineWidth = 2.0;
         ctx.beginPath();
         ctx.moveTo(midX - 8, cy - 5);
@@ -823,14 +823,14 @@ export class WorldRenderer {
       } else if (p.kind === 'MAIN') {
         ctx.strokeStyle =
           t > 0.45
-            ? `rgba(255, 102, 0, ${(t * 0.94).toFixed(2)})`
-            : `rgba(68, 255, 119, ${(t * 0.85).toFixed(2)})`;
+            ? `rgba(255, 140, 0, ${(t * 0.94).toFixed(2)})`
+            : `rgba(59, 224, 104, ${(t * 0.85).toFixed(2)})`;
         ctx.lineWidth = 2.1;
       } else if (p.kind === 'RCS') {
-        ctx.strokeStyle = `rgba(172, 255, 198, ${(t * 0.92).toFixed(2)})`;
+        ctx.strokeStyle = `rgba(142, 245, 171, ${(t * 0.92).toFixed(2)})`;
         ctx.lineWidth = 1.8;
       } else if (p.kind === 'SPARK') {
-        ctx.strokeStyle = `rgba(255, 130, 32, ${t.toFixed(2)})`;
+        ctx.strokeStyle = `rgba(255, 178, 56, ${t.toFixed(2)})`;
         ctx.lineWidth = 2.2;
       } else {
         ctx.strokeStyle = `rgba(68, 255, 119, ${(t * 0.58).toFixed(2)})`;
@@ -1041,7 +1041,7 @@ export class WorldRenderer {
 
       if (fuelRatio > 0.01) {
         ctx.fillStyle =
-          fuelRatio <= 0.25 ? 'rgba(255, 51, 24, 0.82)' : 'rgba(255, 102, 0, 0.78)';
+          fuelRatio <= 0.25 ? 'rgba(255, 51, 24, 0.82)' : 'rgba(255, 140, 0, 0.78)';
         const fillH = tankH * fuelRatio;
         ctx.fillRect(lx(tx) + 1.5, ly(-1.38 + fillH), 0.8 * s - 3, fillH * s);
       }
@@ -1082,59 +1082,120 @@ export class WorldRenderer {
     ctx.restore();
   }
 
+  /**
+   * Velocity-Scaled Flight Path Marker + Predictive Ballistic Drift Arc:
+   * - Extends outward and pulls inward smoothly in direct proportion to shuttle velocity.
+   * - Integrates gravity & atmospheric wind over a 3.4s lookahead to accurately predict
+   *   lateral drift and exact ground/pad impact point (no useless retrograde 'X').
+   */
   private drawFlightVelocityReticle(
     ctx: CanvasRenderingContext2D,
     cam: CameraView,
+    sector: SectorConfig,
+    physics: PhysicsEngine,
     lander: LanderState,
     renderPos: Vec2
   ): void {
     const speed = Math.hypot(lander.vel.x, lander.vel.y);
-    if (speed < 0.18 || lander.groundedPad !== null) return;
+    if (speed < 0.12 || lander.groundedPad !== null) return;
 
-    const center = this.worldToScreen(cam, renderPos.x, renderPos.y);
-    const screenAng = Math.atan2(-lander.vel.y, lander.vel.x);
-    const ringRadius = Math.max(48, Math.min(86, 36 + speed * 4.4 + cam.pxPerMeter * 3.4));
+    const totalMass = lander.dryMassKg + lander.fuelKg;
+    const stepDt = 0.14;
+    const maxSteps = 24; // ~3.36 seconds ballistic prediction lookahead
 
-    const px = center.x + Math.cos(screenAng) * ringRadius;
-    const py = center.y + Math.sin(screenAng) * ringRadius;
+    // Simulate ballistic curve from shuttle footpad level so ground intersection predicts exact touchdown X!
+    let simX = renderPos.x;
+    let simY = renderPos.y + PHYSICS.STRUT_REST_BOTTOM_Y;
+    let simVx = lander.vel.x;
+    let simVy = lander.vel.y;
+
+    const arcWorld: Vec2[] = [{ x: simX, y: simY }];
+    let groundHit: Vec2 | null = null;
+    let fpmWorld: Vec2 | null = null;
+
+    // Velocity-scaled lookahead time (pulls smoothly IN as speed drops, extends OUT at high speed)
+    const fpmLookaheadSteps = Math.max(2, Math.min(14, Math.round(2 + speed * 1.45)));
+
+    for (let i = 1; i <= maxSteps; i++) {
+      let ax = 0;
+      let ay = -sector.gravity;
+
+      if (sector.windBands.length > 0) {
+        const w = physics.sampleWindAt(sector, simX, simY - PHYSICS.STRUT_REST_BOTTOM_Y);
+        ax += (w.vx * 135 + (w.vx - simVx) * 52) / totalMass;
+        ay += (w.vy * 65 + (w.vy - simVy) * 22) / totalMass;
+      }
+
+      simVx += ax * stepDt;
+      simVy += ay * stepDt;
+      simX += simVx * stepDt;
+      simY += simVy * stepDt;
+
+      const floorY = physics.samplePolylineY(sector.terrain, simX);
+      if (floorY !== null && simY <= floorY) {
+        groundHit = { x: simX, y: floorY };
+        arcWorld.push(groundHit);
+        if (!fpmWorld) fpmWorld = groundHit;
+        break;
+      }
+
+      arcWorld.push({ x: simX, y: simY });
+      if (i === fpmLookaheadSteps) {
+        fpmWorld = { x: simX, y: simY };
+      }
+    }
+
+    if (!fpmWorld) {
+      fpmWorld = arcWorld[arcWorld.length - 1];
+    }
+
+    const isUnsafe =
+      Math.abs(Math.min(0, lander.vel.y)) > PHYSICS.SAFE_VS_MAX ||
+      Math.abs(lander.vel.x) > PHYSICS.SAFE_HS_MAX;
+    const col = isUnsafe ? COLORS.AMBER_CAUTION : COLORS.GREEN_PRIMARY;
 
     ctx.save();
-    const isFast =
-      Math.abs(lander.vel.y) > PHYSICS.SAFE_VS_MAX ||
-      Math.abs(lander.vel.x) > PHYSICS.SAFE_HS_MAX;
-    const col = isFast ? COLORS.AMBER_CAUTION : COLORS.GREEN_PRIMARY;
 
-    ctx.strokeStyle = isFast ? 'rgba(255, 102, 0, 0.48)' : 'rgba(68, 255, 119, 0.38)';
-    ctx.lineWidth = 1.4;
-    ctx.setLineDash([4, 4]);
+    // 1. Dotted Predictive Drift Trajectory Curve
+    ctx.strokeStyle = isUnsafe ? 'rgba(255, 140, 0, 0.50)' : 'rgba(59, 224, 104, 0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 5]);
     ctx.beginPath();
-    ctx.moveTo(center.x + Math.cos(screenAng) * 26, center.y + Math.sin(screenAng) * 26);
-    ctx.lineTo(px, py);
+    const s0 = this.worldToScreen(cam, arcWorld[0].x, arcWorld[0].y);
+    ctx.moveTo(s0.x, s0.y);
+    for (let i = 1; i < arcWorld.length; i++) {
+      const sp = this.worldToScreen(cam, arcWorld[i].x, arcWorld[i].y);
+      ctx.lineTo(sp.x, sp.y);
+    }
     ctx.stroke();
     ctx.setLineDash([]);
 
+    // 2. Velocity-Scaled Flight Path Marker (-o- prograde symbol)
+    const fpScreen = this.worldToScreen(cam, fpmWorld.x, fpmWorld.y);
     ctx.strokeStyle = col;
-    ctx.lineWidth = 2.1;
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
-    ctx.arc(px, py, 6.2, 0, Math.PI * 2);
-    ctx.moveTo(px - 12, py);
-    ctx.lineTo(px - 6.2, py);
-    ctx.moveTo(px + 6.2, py);
-    ctx.lineTo(px + 12, py);
-    ctx.moveTo(px, py - 12);
-    ctx.lineTo(px, py - 6.2);
+    ctx.arc(fpScreen.x, fpScreen.y, 6.5, 0, Math.PI * 2);
+    ctx.moveTo(fpScreen.x - 13, fpScreen.y);
+    ctx.lineTo(fpScreen.x - 6.5, fpScreen.y);
+    ctx.moveTo(fpScreen.x + 6.5, fpScreen.y);
+    ctx.lineTo(fpScreen.x + 13, fpScreen.y);
+    ctx.moveTo(fpScreen.x, fpScreen.y - 13);
+    ctx.lineTo(fpScreen.x, fpScreen.y - 6.5);
     ctx.stroke();
 
-    if (Math.abs(lander.vel.x) > 0.35) {
-      const rx = center.x - Math.cos(screenAng) * (ringRadius * 0.78);
-      const ry = center.y - Math.sin(screenAng) * (ringRadius * 0.78);
-      ctx.strokeStyle = COLORS.AMBER_CAUTION;
-      ctx.lineWidth = 1.8;
+    // 3. Ground Drift Impact Predictor Bracket if trajectory meets surface within 3.3s
+    if (groundHit) {
+      const gh = this.worldToScreen(cam, groundHit.x, groundHit.y);
+      ctx.strokeStyle = isUnsafe ? COLORS.RED_KLAXON : COLORS.GREEN_BRIGHT;
+      ctx.lineWidth = 2.0;
       ctx.beginPath();
-      ctx.moveTo(rx - 5.5, ry - 5.5);
-      ctx.lineTo(rx + 5.5, ry + 5.5);
-      ctx.moveTo(rx + 5.5, ry - 5.5);
-      ctx.lineTo(rx - 5.5, ry + 5.5);
+      ctx.moveTo(gh.x - 8, gh.y - 3);
+      ctx.lineTo(gh.x - 8, gh.y + 3);
+      ctx.moveTo(gh.x + 8, gh.y - 3);
+      ctx.lineTo(gh.x + 8, gh.y + 3);
+      ctx.moveTo(gh.x - 8, gh.y);
+      ctx.lineTo(gh.x + 8, gh.y);
       ctx.stroke();
     }
 

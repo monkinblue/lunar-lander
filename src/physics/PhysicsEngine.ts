@@ -133,6 +133,8 @@ export class PhysicsEngine {
       ceilingClearance: ceilY !== null ? Math.max(0, ceilY - (sector.spawnPos.y + PHYSICS.HULL_TOP_Y)) : Infinity,
       currentWindVx: 0,
       currentWindVy: 0,
+      netAccelG: 0,
+      surfaceSlopeDeg: 0,
       inWindShear: false,
       inThermalUpdraft: false,
     };
@@ -419,20 +421,23 @@ export class PhysicsEngine {
       this.emitRcsParticles(lander);
     }
 
-    // Altitude-Layered Wind Forces
+    // Altitude-Layered Wind Forces (ZERO drag in vacuum so momentum is 100% conserved;
+    // strong aerodynamic wind coupling & gust torque in atmospheric wind sectors!)
     const wind = this.sampleWindAt(sector, lander.pos.x, lander.pos.y);
     lander.currentWindVx = wind.vx;
     lander.currentWindVy = wind.vy;
     lander.inWindShear = wind.shear;
 
-    if (lander.groundedPad === null) {
-      const relVx = wind.vx - lander.vel.x;
-      const relVy = wind.vy - lander.vel.y;
-      const dragCoeff = 48; // Aerodynamic hull pressure coefficient
-      forceX += relVx * dragCoeff;
-      forceY += relVy * (dragCoeff * 0.4);
-      if (wind.shear) {
-        torque += Math.sin(this.simTime * 9.5) * 420;
+    if (lander.groundedPad === null && sector.windBands.length > 0) {
+      // Strong wind pressure pushes shuttle toward wind velocity without killing pilot momentum
+      const windActive = Math.abs(wind.vx) > 0.05 || Math.abs(wind.vy) > 0.05;
+      if (windActive) {
+        const relVx = wind.vx - lander.vel.x;
+        const relVy = wind.vy - lander.vel.y;
+        forceX += wind.vx * 135 + relVx * 52;
+        forceY += wind.vy * 65 + relVy * 22;
+        // Aerodynamic weathercocking roll torque from crosswind gusts & shear
+        torque += wind.vx * 78 + (wind.shear ? Math.sin(this.simTime * 8.5) * 920 : 0);
       }
     }
 
@@ -453,13 +458,16 @@ export class PhysicsEngine {
       }
     }
 
-    // Integrate Rigid-Body Linear & Angular Velocity
+    // Integrate Rigid-Body Linear & Angular Velocity (high momentum conservation)
+    const nonGravFx = forceX;
+    const nonGravFy = forceY + sector.gravity * totalMass;
+    lander.netAccelG = Math.hypot(nonGravFx, nonGravFy) / (totalMass * 9.80665);
+
     lander.vel.x += (forceX / totalMass) * dt;
     lander.vel.y += (forceY / totalMass) * dt;
     lander.angularVel += (torque / momentOfInertia) * dt;
 
-    // Gentle parasitic angular clamp so spin never goes NaN
-    lander.angularVel = Math.max(-4.5, Math.min(4.5, lander.angularVel));
+    lander.angularVel = Math.max(-6.8, Math.min(6.8, lander.angularVel));
 
     lander.pos.x += lander.vel.x * dt;
     lander.pos.y += lander.vel.y * dt;
@@ -482,9 +490,10 @@ export class PhysicsEngine {
     // Evaluate Articulated Struts, Terrain/Ceiling Collisions & Touchdown
     this.resolveContactsAndLanding(dt, lander, sector, events);
 
-    // Update AGL & Overhead Ceiling Clearance
+    // Update AGL, Surface Slope & Overhead Ceiling Clearance
     const centerFloorY = this.samplePolylineY(sector.terrain, lander.pos.x) ?? 0;
     lander.agl = Math.max(0, lander.pos.y + PHYSICS.STRUT_REST_BOTTOM_Y - centerFloorY);
+    lander.surfaceSlopeDeg = this.sampleTerrainSlopeDeg(sector.terrain, lander.pos.x);
     if (sector.ceiling) {
       const centerCeilY = this.samplePolylineY(sector.ceiling, lander.pos.x) ?? Infinity;
       lander.ceilingClearance = Math.max(0, centerCeilY - (lander.pos.y + PHYSICS.HULL_TOP_Y));

@@ -36,6 +36,9 @@ export class AudioEngine {
   private cabinHumSource: AudioBufferSourceNode | null = null;
   private cabinHumGain: GainNode | null = null;
 
+  private eerieAmbienceSource: AudioBufferSourceNode | null = null;
+  private eerieAmbienceGain: GainNode | null = null;
+
   private windSource: AudioBufferSourceNode | null = null;
   private windFilter: BiquadFilterNode | null = null;
   private windGain: GainNode | null = null;
@@ -317,6 +320,23 @@ export class AudioEngine {
       this.buffers.set('ambient_crt_buzz', buf);
     }
 
+    if (!this.buffers.has('alien_eerie_ambience')) {
+      const len = sr * 6;
+      const buf = ctx.createBuffer(1, len, sr);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) {
+        const t = i / sr;
+        const lfo = 0.65 + 0.35 * Math.sin((2 * Math.PI * t) / 6);
+        // Hollow tritone / minor-second metallic hull resonance
+        const d1 = Math.sin(2 * Math.PI * 55 * t) * 0.12;
+        const d2 = Math.sin(2 * Math.PI * 77.78 * t + Math.sin(t * 1.1) * 0.4) * 0.07;
+        const d3 = Math.sin(2 * Math.PI * 168.5 * t) * 0.035;
+        data[i] = (d1 + d2 + d3) * lfo;
+      }
+      this.crossfadeLoopSeamless(data, Math.floor(sr * 0.25));
+      this.buffers.set('alien_eerie_ambience', buf);
+    }
+
     if (!this.buffers.has('lv426_wind_loop')) {
       const len = sr * 5;
       const buf = ctx.createBuffer(1, len, sr);
@@ -398,9 +418,15 @@ export class AudioEngine {
 
     // Deep omnipresent 1979 Nostromo "Mother" room sub-drone & CRT buzz
     this.cabinHumGain = ctx.createGain();
-    this.cabinHumGain.gain.value = 0.34;
+    this.cabinHumGain.gain.value = 0.28;
     this.cabinHumGain.connect(this.masterGain);
     this.restartLoopSource('ambient_crt_buzz');
+
+    // Tasteful creepy 1979 Alien deep-space / hull resonance ambience
+    this.eerieAmbienceGain = ctx.createGain();
+    this.eerieAmbienceGain.gain.value = 0.16;
+    this.eerieAmbienceGain.connect(this.masterGain);
+    this.restartLoopSource('alien_eerie_ambience');
 
     this.windFilter = ctx.createBiquadFilter();
     this.windFilter.type = 'lowpass';
@@ -452,6 +478,16 @@ export class AudioEngine {
       this.cabinHumSource = makeSource();
       this.cabinHumSource.connect(this.cabinHumGain);
       this.cabinHumSource.start();
+    } else if (id === 'alien_eerie_ambience' && this.eerieAmbienceGain) {
+      try {
+        this.eerieAmbienceSource?.stop();
+      } catch {
+        /* ignore */
+      }
+      this.eerieAmbienceSource = makeSource();
+      this.eerieAmbienceSource.playbackRate.value = 0.92;
+      this.eerieAmbienceSource.connect(this.eerieAmbienceGain);
+      this.eerieAmbienceSource.start();
     } else if (id === 'lv426_wind_loop' && this.windFilter) {
       try {
         this.windSource?.stop();
@@ -469,10 +505,15 @@ export class AudioEngine {
     rcsDirection: number,
     rcsIntensity: number,
     windSpeedMps: number,
-    flightActive: boolean
+    flightActive: boolean,
+    caveDarkness = 0
   ): void {
     if (!this.ctx || !this.unlocked) return;
     const now = this.ctx.currentTime;
+
+    // Tastefully swell eerie Alien hull ambience slightly inside dark caverns
+    const targetEerie = 0.14 + caveDarkness * 0.11;
+    this.eerieAmbienceGain?.gain.setTargetAtTime(targetEerie, now, 0.35);
 
     if (!flightActive) {
       this.mainThrusterGain?.gain.setTargetAtTime(0, now, 0.06);
@@ -601,6 +642,90 @@ export class AudioEngine {
   /**
    * Satisfying heavy mechanical / industrial cockpit latch engaging sound for buttons & switches.
    */
+  /**
+   * Classic 1979 ALIEN Motion Tracker Proximity Ping for Landing Sequence:
+   * Hollow, slightly creepy electromechanical pulse + faint solenoid flutter whose
+   * repetition rate and tension rise smoothly as the lander nears the ground.
+   * @param closeness 0.0 (far ~68m AGL) to 1.0 (contact imminent <3m AGL)
+   */
+  public playAlienMotionTrackerPing(closeness: number, pan = 0): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const c = Math.max(0, Math.min(1, closeness));
+
+    // 1. Subtle mechanical Ash-tracker micro-flutter tick 22ms before pulse
+    const tickOsc = ctx.createOscillator();
+    const tickGain = ctx.createGain();
+    tickOsc.type = 'triangle';
+    tickOsc.frequency.setValueAtTime(340 + c * 90, now);
+    tickOsc.frequency.exponentialRampToValueAtTime(110, now + 0.016);
+    tickGain.gain.setValueAtTime(0.08 + c * 0.06, now);
+    tickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.018);
+    tickOsc.connect(tickGain);
+    tickGain.connect(this.masterGain);
+    tickOsc.start(now);
+    tickOsc.stop(now + 0.02);
+
+    // 2. Layer ElevenLabs alien_motion_ping buffer (if loaded) + signature hollow 1979 resonant FM blip
+    const buf = this.buffers.get('alien_motion_ping');
+    if (buf) {
+      const onset = this.bufferOnsets.get('alien_motion_ping') ?? 0;
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.playbackRate.value = 0.86 + c * 0.24;
+
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1120 + c * 320;
+      bp.Q.value = 1.6;
+
+      const env = ctx.createGain();
+      const vol = 0.22 + c * 0.24;
+      env.gain.setValueAtTime(0.001, now + 0.02);
+      env.gain.linearRampToValueAtTime(vol, now + 0.028);
+      env.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = Math.max(-0.5, Math.min(0.5, pan));
+
+      src.connect(bp);
+      bp.connect(env);
+      env.connect(panner);
+      panner.connect(this.masterGain);
+      src.start(now + 0.02, onset, 0.26);
+    }
+
+    // Hollow 1979 movie motion-tracker resonant carrier (gives that exact eerie metallic ring)
+    const ping = ctx.createOscillator();
+    const mod = ctx.createOscillator();
+    const modG = ctx.createGain();
+    const pingEnv = ctx.createGain();
+
+    const baseF = 935 + c * 215;
+    ping.type = 'sine';
+    ping.frequency.setValueAtTime(baseF * 1.04, now + 0.022);
+    ping.frequency.exponentialRampToValueAtTime(baseF * 0.96, now + 0.16);
+
+    mod.type = 'sine';
+    mod.frequency.value = 58; // Creepy 58Hz warble flutter inside the blip!
+    modG.gain.value = 18 + c * 14;
+
+    pingEnv.gain.setValueAtTime(0.0001, now + 0.022);
+    pingEnv.gain.linearRampToValueAtTime(0.11 + c * 0.11, now + 0.030);
+    pingEnv.gain.exponentialRampToValueAtTime(0.0001, now + 0.17);
+
+    mod.connect(modG);
+    modG.connect(ping.frequency);
+    ping.connect(pingEnv);
+    pingEnv.connect(this.masterGain);
+
+    mod.start(now + 0.022);
+    ping.start(now + 0.022);
+    mod.stop(now + 0.18);
+    ping.stop(now + 0.18);
+  }
+
   public playButtonLatchLock(pitch = 0.94, volume = 0.95): void {
     if (!this.ctx || !this.masterGain || this.muted) return;
     if (this.buffers.has('button_latch_lock')) {
@@ -735,6 +860,9 @@ export class AudioEngine {
         break;
       case 'lidar_ping':
         this.synthLidarPing(now, pitch, pan, volume);
+        break;
+      case 'alien_motion_ping':
+        this.playAlienMotionTrackerPing(0.5, pan);
         break;
       case 'proximity_klaxon':
         this.synthProximityKlaxon(now, pitch, volume);

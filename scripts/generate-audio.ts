@@ -55,6 +55,14 @@ const SOUND_ASSETS: SoundGenAsset[] = [
     promptInfluence: 0.5,
   },
   {
+    filename: 'alien_eerie_ambience.mp3',
+    prompt:
+      'Subtle tasteful 1979 Alien movie dark deep-space ambient drone, distant hollow metallic ship hull resonance, lonely eerie low air duct breath, sparse haunting sci-fi tension, no music or percussion.',
+    loop: true,
+    durationSeconds: 12,
+    promptInfluence: 0.68,
+  },
+  {
     filename: 'thruster_main_loop.mp3',
     prompt:
       'Deep thunderous SpaceX Starship Raptor rocket landing burn, massive roaring liquid methane flame exhaust, chest-rattling low sub-bass rumble and crackling Mach plume, warm HD recording, no high-pitched whine.',
@@ -159,6 +167,14 @@ const SOUND_ASSETS: SoundGenAsset[] = [
     promptInfluence: 0.5,
   },
   {
+    filename: 'alien_motion_ping.mp3',
+    prompt:
+      '1979 Alien movie handheld motion tracker single proximity pulse ping, eerie hollow analog electronic sonar blip with subtle micro relay flutter, tense retro sci-fi.',
+    loop: false,
+    durationSeconds: 0.9,
+    promptInfluence: 0.72,
+  },
+  {
     filename: 'proximity_klaxon.mp3',
     prompt: 'Tense 1979 Nostromo-style industrial electronic warning klaxon.',
     loop: false,
@@ -227,6 +243,22 @@ const VOICE_CALLOUTS: VoiceCalloutAsset[] = [
   {
     filename: 'voice_bank_angle.mp3',
     text: 'Bank angle.',
+  },
+  {
+    filename: 'voice_lateral_drift.mp3',
+    text: 'Lateral drift.',
+  },
+  {
+    filename: 'voice_minimums.mp3',
+    text: 'Minimums.',
+  },
+  {
+    filename: 'voice_obstacle.mp3',
+    text: 'Obstacle.',
+  },
+  {
+    filename: 'voice_wind_shear_short.mp3',
+    text: 'Wind shear.',
   },
   {
     filename: 'voice_touchdown.mp3',

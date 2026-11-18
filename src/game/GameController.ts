@@ -47,7 +47,7 @@ export class GameController {
   private bezelState: BezelState = {
     sasEnabled: true,
     autoZoomEnabled: true,
-    crtIntensity: 0.74,
+    crtIntensity: 0.50,
     audioMuted: false,
     flightLogsOpen: false,
   };
@@ -85,12 +85,17 @@ export class GameController {
   private statusBannerTimer = 0;
   private menuCursor = 0;
 
-  // Per-sector callout latches & thruster ignition edge
+  // Per-sector callout latches, motion tracker & thruster ignition edge
+  private sectorElapsedSec = 0;
   private warnedFuelLow = false;
   private warnedWind = false;
   private warnedInterference = false;
+  private calledMinimums = false;
   private proximityVoiceCooldown = 0;
   private bankAngleVoiceCooldown = 0;
+  private driftVoiceCooldown = 0;
+  private windShearVoiceCooldown = 0;
+  private motionPingTimer = 0;
   private wasMainEngineLit = false;
 
   // Camera & CRT Glitch FX
@@ -679,10 +684,13 @@ export class GameController {
     this.cameraPos = { ...this.lander.pos };
     this.manualZoom = 1.12;
     this.currentZoom = 1.12;
+    this.sectorElapsedSec = 0;
     this.briefingProgressChars = 0;
     this.warnedFuelLow = false;
     this.warnedWind = false;
     this.warnedInterference = false;
+    this.calledMinimums = false;
+    this.motionPingTimer = 0;
     this.lastBreakdown = null;
     this.lastFailure = null;
     this.phase = 'SECTOR_BRIEFING';
@@ -711,7 +719,10 @@ export class GameController {
     this.sector = fresh;
     this.lander = this.physics.createInitialLander(fresh);
     this.cameraPos = { ...this.lander.pos };
+    this.sectorElapsedSec = 0;
     this.warnedFuelLow = false;
+    this.calledMinimums = false;
+    this.motionPingTimer = 0;
     this.lastFailure = null;
     this.glitchIntensity = 0.25;
     this.phase = 'FLIGHT';
@@ -887,7 +898,13 @@ export class GameController {
     if (this.statusBannerTimer > 0) this.statusBannerTimer = Math.max(0, this.statusBannerTimer - dt);
     if (this.proximityVoiceCooldown > 0) this.proximityVoiceCooldown = Math.max(0, this.proximityVoiceCooldown - dt);
     if (this.bankAngleVoiceCooldown > 0) this.bankAngleVoiceCooldown = Math.max(0, this.bankAngleVoiceCooldown - dt);
+    if (this.driftVoiceCooldown > 0) this.driftVoiceCooldown = Math.max(0, this.driftVoiceCooldown - dt);
+    if (this.windShearVoiceCooldown > 0) this.windShearVoiceCooldown = Math.max(0, this.windShearVoiceCooldown - dt);
     if (this.glitchIntensity > 0) this.glitchIntensity = Math.max(0, this.glitchIntensity - dt * 1.45);
+
+    if (this.phase === 'FLIGHT' && this.lander.alive && !this.bezelState.flightLogsOpen) {
+      this.sectorElapsedSec += dt;
+    }
 
     if (this.displayedScore < this.missionScore) {
       const diff = this.missionScore - this.displayedScore;
@@ -1017,8 +1034,22 @@ export class GameController {
       }
       interpAlpha = this.simAccumulator / PHYSICS.FIXED_DT;
 
-      // Airbus GPWS Minimal Flight Envelope Warnings ("Pull up.", "Descent rate.", "Bank angle.")
+      // 1979 Alien Motion Tracker Ground Proximity Ping + Refined Avionics Warnings
       if (this.phase === 'FLIGHT' && this.lander.alive) {
+        // 1. Classic 1979 Alien Motion Tracker Ping during landing approach (< 66m AGL)
+        if (this.lander.agl < 66 && this.lander.groundedPad === null) {
+          const closeness = 1 - Math.max(0, Math.min(1, this.lander.agl / 66));
+          const interval = 0.17 + Math.pow(1 - closeness, 1.45) * 1.22;
+          this.motionPingTimer -= dt;
+          if (this.motionPingTimer <= 0) {
+            this.motionPingTimer = interval;
+            this.audio.playAlienMotionTrackerPing(closeness);
+          }
+        } else {
+          this.motionPingTimer = 0.25;
+        }
+
+        // 2. Propellant 25% Advisory
         const fuelRatio = this.lander.fuelKg / Math.max(1, this.lander.maxFuelKg);
         if (fuelRatio <= 0.25 && !this.warnedFuelLow) {
           this.warnedFuelLow = true;
@@ -1027,28 +1058,58 @@ export class GameController {
           this.warnedFuelLow = false;
         }
 
-        const criticalPullUp =
-          (this.lander.agl < 22 && this.lander.vel.y < -3.4) ||
-          (this.lander.ceilingClearance < 14 && this.lander.vel.y > 0.4);
-        const sinkRateWarn = this.lander.agl < 56 && this.lander.vel.y < -2.35;
+        // 3. Decision Height "Minimums" Callout (passing through 24m AGL near a pad)
+        if (!this.calledMinimums && this.lander.agl <= 24 && this.lander.agl >= 12 && this.lander.vel.y < -0.2) {
+          const overAnyPad = this.sector.pads.some(
+            (p) => Math.abs(this.lander.pos.x - (p.x1 + p.x2) * 0.5) < 42
+          );
+          if (overAnyPad) {
+            this.calledMinimums = true;
+            this.triggerVoice('voice_minimums');
+          }
+        } else if (this.lander.agl > 48) {
+          this.calledMinimums = false;
+        }
+
+        // 4. Calibrated Less-Sensitive Airbus GPWS Envelope Callouts
+        const criticalPullUp = this.lander.agl < 16 && this.lander.vel.y < -4.1;
+        const ceilingObstacle = this.lander.ceilingClearance < 11 && this.lander.vel.y > 0.6;
+        const sinkRateWarn =
+          ((this.lander.agl < 26 && this.lander.vel.y < -3.05) ||
+            (this.lander.agl < 13 && this.lander.vel.y < -2.45)) &&
+          this.lander.throttle < 0.85;
+        const lateralDriftWarn =
+          this.lander.agl < 26 && Math.abs(this.lander.vel.x) > 1.75;
         const absPitchDeg = Math.abs((this.lander.angle * 180) / Math.PI);
         const bankAngleWarn =
-          (this.lander.agl < 95 && absPitchDeg > 15.0) || absPitchDeg > 28.0;
+          (this.lander.agl < 75 && absPitchDeg > 19.0) || absPitchDeg > 34.0;
 
         if (criticalPullUp) {
-          this.audio.playSfx('proximity_klaxon', { pitch: 0.95, volume: 0.7 });
+          this.audio.playSfx('proximity_klaxon', { pitch: 0.95, volume: 0.65 });
           if (this.proximityVoiceCooldown <= 0) {
-            this.proximityVoiceCooldown = 3.6;
+            this.proximityVoiceCooldown = 4.2;
             this.triggerVoice('voice_pull_up', true);
+          }
+        } else if (ceilingObstacle) {
+          this.audio.playSfx('proximity_klaxon', { pitch: 1.05, volume: 0.6 });
+          if (this.proximityVoiceCooldown <= 0) {
+            this.proximityVoiceCooldown = 4.5;
+            this.triggerVoice('voice_obstacle', true);
           }
         } else if (sinkRateWarn) {
           if (this.proximityVoiceCooldown <= 0) {
-            this.proximityVoiceCooldown = 4.2;
+            this.proximityVoiceCooldown = 6.5;
             this.triggerVoice('voice_proximity');
           }
+        } else if (lateralDriftWarn && this.driftVoiceCooldown <= 0) {
+          this.driftVoiceCooldown = 6.5;
+          this.triggerVoice('voice_lateral_drift');
         } else if (bankAngleWarn && this.bankAngleVoiceCooldown <= 0) {
-          this.bankAngleVoiceCooldown = 4.8;
+          this.bankAngleVoiceCooldown = 6.5;
           this.triggerVoice('voice_bank_angle');
+        } else if (this.lander.inWindShear && this.windShearVoiceCooldown <= 0) {
+          this.windShearVoiceCooldown = 15.0;
+          this.triggerVoice('voice_wind_shear_short');
         }
       }
     }
@@ -1072,7 +1133,8 @@ export class GameController {
       rcsDir,
       rcsInt,
       windSpd,
-      this.phase === 'FLIGHT' && this.lander.alive && !this.bezelState.flightLogsOpen
+      this.phase === 'FLIGHT' && this.lander.alive && !this.bezelState.flightLogsOpen,
+      this.sector.darknessLevel
     );
 
     // Smooth Tactical Camera Tracking + Auto-Zoom Approach Interpolation
@@ -1113,6 +1175,7 @@ export class GameController {
       lander: this.lander,
       bezel: this.bezelState,
       cameraZoom: this.currentZoom,
+      sectorElapsedSec: this.sectorElapsedSec,
       missionScore: this.missionScore,
       displayedScore: this.displayedScore,
       dropStreak: this.dropStreak,

@@ -101,6 +101,8 @@ export interface LanderState {
   ceilingClearance: number; // Distance to cavern ceiling directly overhead (Infinity if none)
   currentWindVx: number;
   currentWindVy: number;
+  netAccelG: number; // Current sensed G-load
+  surfaceSlopeDeg: number; // Slope immediately underneath shuttle
   inWindShear: boolean;
   inThermalUpdraft: boolean;
 }
@@ -218,11 +220,15 @@ export type GamePhase =
 export type VoiceCalloutId =
   | 'voice_boot'
   | 'voice_wind'
+  | 'voice_wind_shear_short'
   | 'voice_interference'
   | 'voice_fuel_low'
   | 'voice_proximity'
   | 'voice_pull_up'
   | 'voice_bank_angle'
+  | 'voice_lateral_drift'
+  | 'voice_minimums'
+  | 'voice_obstacle'
   | 'voice_touchdown'
   | 'voice_hull_breach';
 
@@ -238,6 +244,7 @@ export type SfxId =
   | 'ui_toggle_switch'
   | 'thruster_ignite'
   | 'lidar_ping'
+  | 'alien_motion_ping'
   | 'proximity_klaxon'
   | 'landing_soft_mech'
   | 'landing_hard_thud'

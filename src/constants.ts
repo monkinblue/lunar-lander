@@ -1,13 +1,13 @@
 export const COLORS = {
-  BG_DEEP: '#08130C',
-  GREEN_PRIMARY: '#36C95E',
-  GREEN_BRIGHT: '#7BE098',
-  GREEN_MID: '#23823D',
-  GREEN_DIM: '#123A1F',
-  GREEN_FAINT: '#0B2313',
-  AMBER_CAUTION: '#FF6600',
-  AMBER_BRIGHT: '#FF8C24',
-  AMBER_DIM: '#542000',
+  BG_DEEP: '#030805',
+  GREEN_PRIMARY: '#3BE068',
+  GREEN_BRIGHT: '#8EF5AB',
+  GREEN_MID: '#238C40',
+  GREEN_DIM: '#103D1F',
+  GREEN_FAINT: '#082010',
+  AMBER_CAUTION: '#FF8C00',
+  AMBER_BRIGHT: '#FFB238',
+  AMBER_DIM: '#5E3400',
   RED_KLAXON: '#FF3318',
   RED_DIM: '#6B1206',
   CHASSIS_OUTER: '#0A0D0B',
@@ -26,14 +26,14 @@ export const PHYSICS = {
   OVERDRIVE_MULTIPLIER: 1.35, // Shift + W emergency burn
   MAIN_BURN_RATE_KG_S: 8.2, // kg/s at 100% throttle
   OVERDRIVE_BURN_PENALTY: 1.65,
-  THROTTLE_SPOOL_UP_RATE: 4.2, // /s
-  THROTTLE_SPOOL_DOWN_RATE: 6.0, // /s
+  THROTTLE_SPOOL_UP_RATE: 4.6, // /s
+  THROTTLE_SPOOL_DOWN_RATE: 6.4, // /s
 
-  // Attitude & RCS
-  RCS_TORQUE_NM: 6200,
-  RCS_BURN_RATE_KG_S: 0.95,
-  SAS_DAMPING_TORQUE: 3400,
-  SAS_BURN_RATE_KG_S: 0.35,
+  // Attitude & RCS (Increased roll authority & preserved rotational momentum)
+  RCS_TORQUE_NM: 12200,
+  RCS_BURN_RATE_KG_S: 0.85,
+  SAS_DAMPING_TORQUE: 1550,
+  SAS_BURN_RATE_KG_S: 0.25,
 
   // S / Down Retro-Stabilizer Assist
   RETRO_ANGULAR_DAMP: 7200,
@@ -86,12 +86,16 @@ export const PHYSICS = {
 
 export const VOICE_TRANSCRIPTS: Record<string, string> = {
   voice_boot: 'INTERFACE 2037 READY. ORBITAL DESCENT TELEMETRY ONLINE.',
-  voice_wind: 'WIND SHEAR.',
+  voice_wind: 'CAUTION. ATMOSPHERIC WIND SHEAR.',
+  voice_wind_shear_short: 'WIND SHEAR.',
   voice_interference: 'ELECTROMAGNETIC INTERFERENCE. ENGAGE RADAR.',
   voice_fuel_low: 'CAUTION. PROPELLANT TWENTY-FIVE PERCENT.',
   voice_proximity: 'DESCENT RATE.',
   voice_pull_up: 'PULL UP.',
   voice_bank_angle: 'BANK ANGLE.',
+  voice_lateral_drift: 'LATERAL DRIFT.',
+  voice_minimums: 'MINIMUMS.',
+  voice_obstacle: 'OBSTACLE.',
   voice_touchdown: 'CONTACT LIGHT. ENGINE STOP.',
   voice_hull_breach: 'CRITICAL HULL BREACH. SIGNAL LOST.',
 };

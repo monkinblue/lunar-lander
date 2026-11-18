@@ -456,8 +456,8 @@ export class BezelUI {
     const capH = 38;
     const glow = active ? 0.28 + 0.08 * Math.sin(timeSec * 8) : hovered ? 0.14 : 0.05;
     ctx.fillStyle = active
-      ? `rgba(255, 102, 0, ${glow.toFixed(2)})`
-      : `rgba(68, 255, 119, ${glow.toFixed(2)})`;
+      ? `rgba(255, 140, 0, ${glow.toFixed(2)})`
+      : `rgba(59, 224, 104, ${glow.toFixed(2)})`;
     ctx.fillRect(capX, capY, capW, capH);
 
     ctx.strokeStyle = active ? COLORS.AMBER_CAUTION : COLORS.GREEN_PRIMARY;
