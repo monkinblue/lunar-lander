@@ -33,17 +33,17 @@ export class AudioEngine {
   private rcsFilter: BiquadFilterNode | null = null;
   private rcsGain: GainNode | null = null;
 
-  private cabinHumSource: AudioBufferSourceNode | null = null;
-  private cabinHumGain: GainNode | null = null;
-
   private eerieAmbienceSource: AudioBufferSourceNode | null = null;
+  private eerieAmbienceFilter: BiquadFilterNode | null = null;
   private eerieAmbienceGain: GainNode | null = null;
+  private deepSpaceBusGain: GainNode | null = null;
 
   private windSource: AudioBufferSourceNode | null = null;
   private windFilter: BiquadFilterNode | null = null;
   private windGain: GainNode | null = null;
 
   private buffers = new Map<string, AudioBuffer>();
+  private decodedRealAssets = new Set<string>();
   private bufferOnsets = new Map<string, number>();
   private rawPrefetched = new Map<string, { data: ArrayBuffer; category: 'loop' | 'sfx' | 'voice' }>();
   private prefetchPromise: Promise<void> | null = null;
@@ -71,7 +71,7 @@ export class AudioEngine {
       const data = (await res.json()) as Partial<AudioManifestData>;
       if (!data || typeof data.assets !== 'object' || data.assets === null) return;
 
-      const entries = Object.entries(data.assets);
+      const entries = Object.entries(data.assets).filter(([id]) => id !== 'ambient_crt_buzz');
       await Promise.all(
         entries.map(async ([id, meta]) => {
           try {
@@ -116,11 +116,43 @@ export class AudioEngine {
     return 0;
   }
 
+  /**
+   * Trims MP3 encoder boundary padding and builds a mathematically continuous
+   * overlap-cut loop (where sample L-1 transitions directly into sample L at wrap-around)
+   * so looped ambience/thruster/wind tracks NEVER exhibit periodic clicks or reset seams!
+   */
+  private createSeamlessOverlapLoop(srcBuf: AudioBuffer, crossfadeSec = 1.1): AudioBuffer {
+    if (!this.ctx) return srcBuf;
+    const sr = srcBuf.sampleRate;
+    const trim = Math.min(Math.floor(sr * 0.055), Math.floor(srcBuf.length * 0.05));
+    const trimmedLen = srcBuf.length - trim * 2;
+    if (trimmedLen < sr * 1.2) return srcBuf;
+
+    const fadeSamples = Math.min(Math.floor(sr * crossfadeSec), Math.floor(trimmedLen * 0.24));
+    const outLen = trimmedLen - fadeSamples;
+    const outBuf = this.ctx.createBuffer(srcBuf.numberOfChannels, outLen, sr);
+
+    for (let ch = 0; ch < srcBuf.numberOfChannels; ch++) {
+      const src = srcBuf.getChannelData(ch);
+      const dst = outBuf.getChannelData(ch);
+      for (let i = 0; i < fadeSamples; i++) {
+        const theta = (i / fadeSamples) * (Math.PI * 0.5);
+        const wHead = Math.sin(theta);
+        const wTail = Math.cos(theta);
+        dst[i] = src[trim + i] * wHead + src[trim + outLen + i] * wTail;
+      }
+      for (let i = fadeSamples; i < outLen; i++) {
+        dst[i] = src[trim + i];
+      }
+    }
+    return outBuf;
+  }
+
   private async decodePrefetchedBuffers(): Promise<void> {
     if (!this.ctx) return;
     const ctx = this.ctx;
     const pending = Array.from(this.rawPrefetched.entries()).filter(
-      ([id]) => !this.buffers.has(id)
+      ([id]) => id !== 'ambient_crt_buzz' && !this.decodedRealAssets.has(id)
     );
     if (pending.length === 0) return;
 
@@ -128,10 +160,19 @@ export class AudioEngine {
       pending.map(async ([id, item]) => {
         try {
           const copy = item.data.slice(0);
-          const decoded = await ctx.decodeAudioData(copy);
-          this.buffers.set(id, decoded);
+          const rawDecoded = await ctx.decodeAudioData(copy);
+          const finalBuf =
+            item.category === 'loop'
+              ? this.createSeamlessOverlapLoop(
+                  rawDecoded,
+                  id === 'alien_eerie_ambience' ? 1.6 : 0.65
+                )
+              : rawDecoded;
+
+          this.decodedRealAssets.add(id);
+          this.buffers.set(id, finalBuf);
           if (item.category === 'sfx') {
-            this.bufferOnsets.set(id, this.detectTransientOnsetSec(decoded));
+            this.bufferOnsets.set(id, this.detectTransientOnsetSec(finalBuf));
           }
           if (item.category === 'loop') {
             this.restartLoopSource(id);
@@ -283,8 +324,7 @@ export class AudioEngine {
           0.08 * Math.sin(2 * Math.PI * 71 * t * 4);
         data[i] = Math.tanh((brown * 2.8 + pink * 0.85) * rumbleMod * 1.3);
       }
-      this.crossfadeLoopSeamless(data, Math.floor(sr * 0.15));
-      this.buffers.set('thruster_main_loop', buf);
+      this.buffers.set('thruster_main_loop', this.createSeamlessOverlapLoop(buf, 0.35));
     }
 
     if (!this.buffers.has('thruster_rcs_loop')) {
@@ -298,47 +338,26 @@ export class AudioEngine {
         prev = white;
         data[i] = Math.max(-0.95, Math.min(0.95, hp * 0.48));
       }
-      this.crossfadeLoopSeamless(data, Math.floor(sr * 0.08));
-      this.buffers.set('thruster_rcs_loop', buf);
-    }
-
-    if (!this.buffers.has('ambient_crt_buzz')) {
-      const len = sr * 4;
-      const buf = ctx.createBuffer(1, len, sr);
-      const data = buf.getChannelData(0);
-      let lp = 0;
-      for (let i = 0; i < len; i++) {
-        const t = i / sr;
-        const white = Math.random() * 2 - 1;
-        lp = lp + 0.018 * (white - lp);
-        const hum60 = Math.sin(2 * Math.PI * 60 * t) * 0.06;
-        const hum120 = Math.sin(2 * Math.PI * 120 * t) * 0.032;
-        const sub42 = Math.sin(2 * Math.PI * 42 * t) * 0.09;
-        data[i] = lp * 0.9 + hum60 + hum120 + sub42;
-      }
-      this.crossfadeLoopSeamless(data, Math.floor(sr * 0.12));
-      this.buffers.set('ambient_crt_buzz', buf);
+      this.buffers.set('thruster_rcs_loop', this.createSeamlessOverlapLoop(buf, 0.2));
     }
 
     if (!this.buffers.has('alien_eerie_ambience')) {
-      const len = sr * 6;
+      const len = sr * 12;
       const buf = ctx.createBuffer(1, len, sr);
       const data = buf.getChannelData(0);
       for (let i = 0; i < len; i++) {
         const t = i / sr;
-        const lfo = 0.65 + 0.35 * Math.sin((2 * Math.PI * t) / 6);
-        // Hollow tritone / minor-second metallic hull resonance
-        const d1 = Math.sin(2 * Math.PI * 55 * t) * 0.12;
-        const d2 = Math.sin(2 * Math.PI * 77.78 * t + Math.sin(t * 1.1) * 0.4) * 0.07;
-        const d3 = Math.sin(2 * Math.PI * 168.5 * t) * 0.035;
+        const lfo = 0.72 + 0.28 * Math.sin((2 * Math.PI * t) / 12);
+        const d1 = Math.sin(2 * Math.PI * 55 * t) * 0.10;
+        const d2 = Math.sin(2 * Math.PI * 77.78 * t + Math.sin((2 * Math.PI * t) / 12) * 0.35) * 0.06;
+        const d3 = Math.sin(2 * Math.PI * 164.81 * t) * 0.025;
         data[i] = (d1 + d2 + d3) * lfo;
       }
-      this.crossfadeLoopSeamless(data, Math.floor(sr * 0.25));
       this.buffers.set('alien_eerie_ambience', buf);
     }
 
     if (!this.buffers.has('lv426_wind_loop')) {
-      const len = sr * 5;
+      const len = sr * 6;
       const buf = ctx.createBuffer(1, len, sr);
       const data = buf.getChannelData(0);
       let y1 = 0;
@@ -346,7 +365,7 @@ export class AudioEngine {
       for (let i = 0; i < len; i++) {
         const t = i / sr;
         const white = Math.random() * 2 - 1;
-        const f = 320 + 140 * Math.sin((2 * Math.PI * t) / 5) + 75 * Math.cos((4 * Math.PI * t) / 5);
+        const f = 320 + 140 * Math.sin((2 * Math.PI * t) / 6) + 75 * Math.cos((4 * Math.PI * t) / 6);
         const c = 2 * Math.sin((Math.PI * f) / sr);
         const q = 0.09;
         y1 += c * y2;
@@ -354,20 +373,7 @@ export class AudioEngine {
         y2 += c * hp;
         data[i] = Math.tanh(y2 * 0.28 + white * 0.04);
       }
-      this.crossfadeLoopSeamless(data, Math.floor(sr * 0.2));
-      this.buffers.set('lv426_wind_loop', buf);
-    }
-  }
-
-  private crossfadeLoopSeamless(data: Float32Array, fadeSamples: number): void {
-    const n = data.length;
-    if (fadeSamples * 2 >= n) return;
-    for (let i = 0; i < fadeSamples; i++) {
-      const alpha = i / fadeSamples;
-      const head = data[i];
-      const tail = data[n - fadeSamples + i];
-      data[i] = tail * (1 - alpha) + head * alpha;
-      data[n - fadeSamples + i] = data[n - fadeSamples + i] * (1 - alpha) + data[0] * alpha;
+      this.buffers.set('lv426_wind_loop', this.createSeamlessOverlapLoop(buf, 0.5));
     }
   }
 
@@ -416,15 +422,18 @@ export class AudioEngine {
     this.rcsGain.connect(this.masterGain);
     this.restartLoopSource('thruster_rcs_loop');
 
-    // Deep omnipresent 1979 Nostromo "Mother" room sub-drone & CRT buzz
-    this.cabinHumGain = ctx.createGain();
-    this.cabinHumGain.gain.value = 0.28;
-    this.cabinHumGain.connect(this.masterGain);
-    this.restartLoopSource('ambient_crt_buzz');
+    // Continuous, non-repeating 1979 ALIEN deep-space ambience (replaces old static CRT buzz!)
+    this.startAlienDeepSpaceAmbience();
 
-    // Tasteful creepy 1979 Alien deep-space / hull resonance ambience
+    // Seamlessly crossfaded & low-passed (480Hz, zero hiss/static) hull resonance layer
+    this.eerieAmbienceFilter = ctx.createBiquadFilter();
+    this.eerieAmbienceFilter.type = 'lowpass';
+    this.eerieAmbienceFilter.frequency.value = 480;
+    this.eerieAmbienceFilter.Q.value = 0.65;
+
     this.eerieAmbienceGain = ctx.createGain();
-    this.eerieAmbienceGain.gain.value = 0.16;
+    this.eerieAmbienceGain.gain.value = 0.11;
+    this.eerieAmbienceFilter.connect(this.eerieAmbienceGain);
     this.eerieAmbienceGain.connect(this.masterGain);
     this.restartLoopSource('alien_eerie_ambience');
 
@@ -436,6 +445,165 @@ export class AudioEngine {
     this.windFilter.connect(this.windGain);
     this.windGain.connect(this.masterGain);
     this.restartLoopSource('lv426_wind_loop');
+  }
+
+  /**
+   * Infinite, non-repeating 1979 ALIEN ("Nostromo in Deep Space") synthesizer bed:
+   * Uses prime-ratio ultra-slow LFOs (21s, 29s, 37s, 43s) modulating deep cosmic fifths,
+   * distant hollow minor/tritone hull harmonics, and stereo drift — zero static, zero loop seams.
+   */
+  private startAlienDeepSpaceAmbience(): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.masterGain) return;
+
+    this.deepSpaceBusGain = ctx.createGain();
+    this.deepSpaceBusGain.gain.value = 0.16;
+    this.deepSpaceBusGain.connect(this.masterGain);
+
+    // 1. Deep Cosmic Void Sub-Fifth (D1 36.71Hz + A1 55.00Hz)
+    const sub1 = ctx.createOscillator();
+    const sub2 = ctx.createOscillator();
+    const subGain = ctx.createGain();
+    sub1.type = 'sine';
+    sub2.type = 'sine';
+    sub1.frequency.value = 36.71;
+    sub2.frequency.value = 55.04;
+    subGain.gain.value = 0.24;
+
+    const subLfo = ctx.createOscillator();
+    const subLfoGain = ctx.createGain();
+    subLfo.type = 'sine';
+    subLfo.frequency.value = 0.034; // ~29.4s breath
+    subLfoGain.gain.value = 0.07;
+    subLfo.connect(subLfoGain);
+    subLfoGain.connect(subGain.gain);
+
+    sub1.connect(subGain);
+    sub2.connect(subGain);
+    subGain.connect(this.deepSpaceBusGain);
+    sub1.start();
+    sub2.start();
+    subLfo.start();
+
+    // 2. Haunting Jerry Goldsmith / Alan Splet Deep-Space Harmonic Shimmer (incommensurate LFOs)
+    const voices = [
+      { freq: 82.41, lfoHz: 0.047, pan: -0.35, amp: 0.09 }, // E2
+      { freq: 116.54, lfoHz: 0.027, pan: 0.35, amp: 0.065 }, // Bb2 eerie tritone
+      { freq: 164.81, lfoHz: 0.021, pan: -0.18, amp: 0.045 }, // E3 hollow fifth
+      { freq: 220.0, lfoHz: 0.017, pan: 0.22, amp: 0.028 }, // A3 distant starlight
+    ];
+
+    for (const v of voices) {
+      const osc = ctx.createOscillator();
+      const lp = ctx.createBiquadFilter();
+      const vGain = ctx.createGain();
+      const panner = ctx.createStereoPanner();
+
+      osc.type = 'triangle';
+      osc.frequency.value = v.freq;
+
+      // Tiny slow pitch drift (+/- 0.35 Hz) for organic tape-flutter space warmth
+      const pitchLfo = ctx.createOscillator();
+      const pitchDepth = ctx.createGain();
+      pitchLfo.type = 'sine';
+      pitchLfo.frequency.value = v.lfoHz * 1.37;
+      pitchDepth.gain.value = 0.35;
+      pitchLfo.connect(pitchDepth);
+      pitchDepth.connect(osc.frequency);
+
+      lp.type = 'lowpass';
+      lp.frequency.value = 290;
+      lp.Q.value = 1.4;
+
+      const filterLfo = ctx.createOscillator();
+      const filterDepth = ctx.createGain();
+      filterLfo.type = 'sine';
+      filterLfo.frequency.value = v.lfoHz;
+      filterDepth.gain.value = 115;
+      filterLfo.connect(filterDepth);
+      filterDepth.connect(lp.frequency);
+
+      vGain.gain.value = v.amp;
+      const ampLfo = ctx.createOscillator();
+      const ampDepth = ctx.createGain();
+      ampLfo.type = 'sine';
+      ampLfo.frequency.value = v.lfoHz * 0.79;
+      ampDepth.gain.value = v.amp * 0.65;
+      ampLfo.connect(ampDepth);
+      ampDepth.connect(vGain.gain);
+
+      panner.pan.value = v.pan;
+
+      osc.connect(lp);
+      lp.connect(vGain);
+      vGain.connect(panner);
+      panner.connect(this.deepSpaceBusGain);
+
+      osc.start();
+      pitchLfo.start();
+      filterLfo.start();
+      ampLfo.start();
+    }
+
+    // 3. Sparse, non-repeating 1979 ALIEN lonely deep-space ionosphere / cosmic hull swells
+    const cosmicHarmonics = [110.0, 130.81, 146.83, 155.56, 196.0, 233.08, 293.66];
+    const scheduleDeepSpaceSwell = (): void => {
+      if (!this.ctx || !this.deepSpaceBusGain) return;
+      if (this.ctx.state === 'running' && !this.muted) {
+        const now = this.ctx.currentTime;
+        const dur = 5.5 + Math.random() * 3.5;
+        const baseFreq =
+          cosmicHarmonics[Math.floor(Math.random() * cosmicHarmonics.length)] ?? 146.83;
+        const driftRatio = Math.random() < 0.5 ? 0.986 : 1.014;
+
+        const oscA = this.ctx.createOscillator();
+        const oscB = this.ctx.createOscillator();
+        const lp = this.ctx.createBiquadFilter();
+        const env = this.ctx.createGain();
+        const pan = this.ctx.createStereoPanner();
+
+        oscA.type = 'sine';
+        oscB.type = 'triangle';
+        oscA.frequency.setValueAtTime(baseFreq, now);
+        oscA.frequency.linearRampToValueAtTime(baseFreq * driftRatio, now + dur);
+        oscB.frequency.setValueAtTime(baseFreq * 1.502, now);
+        oscB.frequency.linearRampToValueAtTime(baseFreq * 1.502 * driftRatio, now + dur);
+
+        lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(220, now);
+        lp.frequency.linearRampToValueAtTime(420, now + dur * 0.45);
+        lp.frequency.linearRampToValueAtTime(180, now + dur);
+        lp.Q.value = 2.2;
+
+        const startPan = (Math.random() * 2 - 1) * 0.6;
+        pan.pan.setValueAtTime(startPan, now);
+        pan.pan.linearRampToValueAtTime(-startPan * 0.7, now + dur);
+
+        env.gain.setValueAtTime(0.0001, now);
+        env.gain.linearRampToValueAtTime(0.042, now + dur * 0.42);
+        env.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+
+        const subMix = this.ctx.createGain();
+        subMix.gain.value = 0.35;
+
+        oscA.connect(lp);
+        oscB.connect(subMix);
+        subMix.connect(lp);
+        lp.connect(env);
+        env.connect(pan);
+        pan.connect(this.deepSpaceBusGain);
+
+        oscA.start(now);
+        oscB.start(now);
+        oscA.stop(now + dur + 0.05);
+        oscB.stop(now + dur + 0.05);
+      }
+
+      const nextDelayMs = (9.5 + Math.random() * 8.5) * 1000;
+      window.setTimeout(scheduleDeepSpaceSwell, nextDelayMs);
+    };
+
+    window.setTimeout(scheduleDeepSpaceSwell, 4500);
   }
 
   private restartLoopSource(id: string): void {
@@ -469,24 +637,15 @@ export class AudioEngine {
       this.rcsThrusterSource = makeSource();
       this.rcsThrusterSource.connect(this.rcsFilter);
       this.rcsThrusterSource.start();
-    } else if ((id === 'ambient_crt_buzz' || id === 'nostromo_cabin_hum') && this.cabinHumGain) {
-      try {
-        this.cabinHumSource?.stop();
-      } catch {
-        /* ignore */
-      }
-      this.cabinHumSource = makeSource();
-      this.cabinHumSource.connect(this.cabinHumGain);
-      this.cabinHumSource.start();
-    } else if (id === 'alien_eerie_ambience' && this.eerieAmbienceGain) {
+    } else if (id === 'alien_eerie_ambience' && this.eerieAmbienceFilter) {
       try {
         this.eerieAmbienceSource?.stop();
       } catch {
         /* ignore */
       }
       this.eerieAmbienceSource = makeSource();
-      this.eerieAmbienceSource.playbackRate.value = 0.92;
-      this.eerieAmbienceSource.connect(this.eerieAmbienceGain);
+      this.eerieAmbienceSource.playbackRate.value = 0.78;
+      this.eerieAmbienceSource.connect(this.eerieAmbienceFilter);
       this.eerieAmbienceSource.start();
     } else if (id === 'lv426_wind_loop' && this.windFilter) {
       try {
@@ -511,9 +670,10 @@ export class AudioEngine {
     if (!this.ctx || !this.unlocked) return;
     const now = this.ctx.currentTime;
 
-    // Tastefully swell eerie Alien hull ambience slightly inside dark caverns
-    const targetEerie = 0.14 + caveDarkness * 0.11;
-    this.eerieAmbienceGain?.gain.setTargetAtTime(targetEerie, now, 0.35);
+    // Tastefully swell deep-space & eerie hull resonance inside dark caverns
+    const targetEerie = 0.09 + caveDarkness * 0.09;
+    this.eerieAmbienceGain?.gain.setTargetAtTime(targetEerie, now, 0.45);
+    this.deepSpaceBusGain?.gain.setTargetAtTime(0.15 + caveDarkness * 0.06, now, 0.45);
 
     if (!flightActive) {
       this.mainThrusterGain?.gain.setTargetAtTime(0, now, 0.06);
