@@ -87,14 +87,6 @@ const SOUND_ASSETS: SoundGenAsset[] = [
 
   // Crisp HD One-Shot SFX (eleven_text_to_sound_v2)
   {
-    filename: 'screen_power_on.mp3',
-    prompt:
-      'Heavy industrial 1970s relay switch thunk followed by rising CRT high-voltage flyback whine and static snap.',
-    loop: false,
-    durationSeconds: 2.8,
-    promptInfluence: 0.5,
-  },
-  {
     filename: 'nostromo_boot_sequence.mp3',
     prompt:
       '1979 sci-fi spacecraft mainframe computer awakening sequence, vintage analog synthesizer data chirps, stuttering electronic telemetry bleeps, relay switches clattering, magnetic tape drive whir, eerie cassette futurism.',
@@ -473,6 +465,16 @@ async function writeManifestFromDisk(voiceId: string | null): Promise<AudioManif
         bytes,
       };
     }
+  }
+
+  const customStartPath = path.join(AUDIO_OUT_DIR, 'homeade_computer_start.m4a');
+  const customStartBytes = await fileSizeBytes(customStartPath);
+  if (customStartBytes > 512) {
+    assets['homeade_computer_start'] = {
+      path: '/audio/homeade_computer_start.m4a',
+      category: 'sfx',
+      bytes: customStartBytes,
+    };
   }
 
   for (const v of VOICE_CALLOUTS) {

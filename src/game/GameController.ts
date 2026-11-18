@@ -2,10 +2,16 @@ import { AudioEngine } from '../audio/AudioEngine';
 import { PHYSICS, VOICE_TRANSCRIPTS } from '../constants';
 import { SectorGenerator } from '../levels/SectorGenerator';
 import { PhysicsEngine } from '../physics/PhysicsEngine';
+import { BOOT_TIMING } from '../render/BootLogoRenderer';
 import { BOOT_LINES, HudRenderer } from '../render/HudRenderer';
+import { MobileHudRenderer, type MobileActiveTouchState } from '../render/MobileHudRenderer';
 import { WebGLCRT } from '../render/WebGLCRT';
 import { WorldRenderer, type CameraView } from '../render/WorldRenderer';
-import { GlobalLeaderboardService, accuracyToGrade } from '../services/leaderboard';
+import {
+  GlobalLeaderboardService,
+  accuracyToGrade,
+  formatSectorCode,
+} from '../services/leaderboard';
 import type {
   BezelState,
   GamePhase,
@@ -13,7 +19,10 @@ import type {
   LandingEvaluation,
   LandingGrade,
   LandingPad,
+  LastSubmittedRun,
   LeaderboardMode,
+  MenuModeSelection,
+  SafeAreaInsets,
   SectorConfig,
   SectorScoreBreakdown,
   TouchdownSnapshot,
@@ -61,7 +70,14 @@ export class GameController {
   private endlessMode = false;
   private endlessDepth = 1;
   private endlessSeed = 203779;
+  private selectedMenuMode: MenuModeSelection = 'RANKED_CAMPAIGN';
   private selectedStartSector = 1;
+  private mobileMode = false;
+  private isFullscreen = false;
+  private canvasOffsetX = 0;
+  private canvasOffsetY = 0;
+  private safeAreaInsets: SafeAreaInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  private activeTouchPointers = new Map<number, string>();
   private gameEmergencyPulseAvailable = true;
   private missionScore = 0;
   private displayedScore = 0;
@@ -77,6 +93,7 @@ export class GameController {
   private callsignDraft = 'PILOT-01';
   private manifestTab: LeaderboardMode = 'CAMPAIGN';
   private scoreSubmittedForRun = false;
+  private lastSubmittedRun: LastSubmittedRun | null = null;
   private uplinkSubmitState: 'IDLE' | 'TRANSMITTING' | 'CONFIRMED' | 'OFFLINE_SAVED' = 'IDLE';
   private uplinkConfirmText: string | null = null;
   private sessionLogs: string[] = [
@@ -86,6 +103,8 @@ export class GameController {
 
   // Typewriter & 1979 Alien Awakening State
   private bootPoweredOn = false;
+  private bootElapsedSec = 0;
+  private bootModeSwitchPlayed = false;
   private crtWarmupProgress = 0;
   private bootProgressChars = 0;
   private bootTransitionPlayed = false;
@@ -148,12 +167,15 @@ export class GameController {
 
     this.bindInputListeners();
     this.bindAccessibilityButtons();
+    this.bindMobileCallsignAndFullscreen();
     this.resize(window.innerWidth, window.innerHeight);
   }
 
-  public resize(widthCss: number, heightCss: number): void {
-    this.viewportWidth = Math.max(640, widthCss);
-    this.viewportHeight = Math.max(440, heightCss);
+  public resize(widthCss: number, heightCss: number, offsetX = 0, offsetY = 0): void {
+    this.viewportWidth = Math.max(320, widthCss);
+    this.viewportHeight = Math.max(240, heightCss);
+    this.canvasOffsetX = offsetX;
+    this.canvasOffsetY = offsetY;
     this.dpr = Math.min(window.devicePixelRatio || 1, 2.5);
 
     this.webglCanvas.width = Math.round(this.viewportWidth * this.dpr);
@@ -162,6 +184,124 @@ export class GameController {
     this.crtRect = { x: 0, y: 0, width: this.viewportWidth, height: this.viewportHeight };
     this.offscreenCrtCanvas.width = Math.round(this.crtRect.width * this.dpr);
     this.offscreenCrtCanvas.height = Math.round(this.crtRect.height * this.dpr);
+    this.readSafeAreaInsets();
+  }
+
+  private readSafeAreaInsets(): void {
+    const probe = document.getElementById('safe-area-probe');
+    if (!probe) return;
+    const cs = window.getComputedStyle(probe);
+    this.safeAreaInsets = {
+      top: Number.parseFloat(cs.top) || 0,
+      right: Number.parseFloat(cs.right) || 0,
+      bottom: Number.parseFloat(cs.bottom) || 0,
+      left: Number.parseFloat(cs.left) || 0,
+    };
+  }
+
+  private bindMobileCallsignAndFullscreen(): void {
+    const syncFs = () => {
+      const docAny = document as Document & { webkitFullscreenElement?: Element | null };
+      this.isFullscreen = Boolean(document.fullscreenElement || docAny.webkitFullscreenElement);
+      this.readSafeAreaInsets();
+    };
+    document.addEventListener('fullscreenchange', syncFs);
+    document.addEventListener('webkitfullscreenchange', syncFs);
+
+    const mobileInput = document.getElementById('mobile-callsign-input') as HTMLInputElement | null;
+    if (mobileInput) {
+      mobileInput.addEventListener('input', () => {
+        if (this.phase === 'CALLSIGN_ENTRY') {
+          this.callsignDraft = mobileInput.value.toUpperCase().slice(0, 16);
+          mobileInput.value = this.callsignDraft;
+        }
+      });
+      mobileInput.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' && this.phase === 'CALLSIGN_ENTRY') {
+          ev.preventDefault();
+          mobileInput.blur();
+          this.audio.playButtonLatchLock();
+          void this.submitCallsign();
+        }
+      });
+    }
+  }
+
+  private focusMobileCallsignInput(): void {
+    const mobileInput = document.getElementById('mobile-callsign-input') as HTMLInputElement | null;
+    if (!mobileInput) return;
+    mobileInput.value = this.callsignDraft;
+    try {
+      mobileInput.focus({ preventScroll: true });
+    } catch {
+      mobileInput.focus();
+    }
+  }
+
+  private toggleFullscreen(): void {
+    const docAny = document as Document & {
+      webkitFullscreenElement?: Element | null;
+      webkitExitFullscreen?: () => Promise<void> | void;
+    };
+    const targetEl = (document.getElementById('console-shell') ||
+      document.documentElement) as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void;
+    };
+
+    if (document.fullscreenElement || docAny.webkitFullscreenElement) {
+      if (document.exitFullscreen) {
+        void document.exitFullscreen().catch(() => {});
+      } else if (docAny.webkitExitFullscreen) {
+        void docAny.webkitExitFullscreen();
+      }
+      return;
+    }
+
+    if (targetEl.requestFullscreen) {
+      void targetEl
+        .requestFullscreen({ navigationUI: 'hide' })
+        .catch(() => targetEl.requestFullscreen())
+        .catch(() => {
+          this.showStatusToast('FULLSCREEN BLOCKED — USE SHARE → ADD TO HOME SCREEN ON IOS', 2.6);
+        });
+    } else if (targetEl.webkitRequestFullscreen) {
+      void targetEl.webkitRequestFullscreen();
+    } else {
+      this.showStatusToast('TIP: USE SHARE → ADD TO HOME SCREEN FOR FULLSCREEN', 2.6);
+    }
+  }
+
+  private getMobileTouchState(): MobileActiveTouchState {
+    let thrust = false;
+    let overdrive = false;
+    let rollLeft = false;
+    let rollRight = false;
+    let retro = false;
+    for (const ctrlId of this.activeTouchPointers.values()) {
+      if (ctrlId === 'touch-thrust') thrust = true;
+      else if (ctrlId === 'touch-overdrive') {
+        thrust = true;
+        overdrive = true;
+      } else if (ctrlId === 'touch-roll-left') rollLeft = true;
+      else if (ctrlId === 'touch-roll-right') rollRight = true;
+      else if (ctrlId === 'touch-retro') retro = true;
+    }
+    return { thrust, overdrive, rollLeft, rollRight, retro };
+  }
+
+  private hitTestTouchControls(cx: number, cy: number): string | null {
+    for (let i = this.hudRenderer.touchControls.length - 1; i >= 0; i--) {
+      const b = this.hudRenderer.touchControls[i];
+      if (
+        cx >= b.rect.x &&
+        cx <= b.rect.x + b.rect.width &&
+        cy >= b.rect.y &&
+        cy <= b.rect.y + b.rect.height
+      ) {
+        return b.id;
+      }
+    }
+    return null;
   }
 
   public setBackgroundPaused(paused: boolean): void {
@@ -219,15 +359,24 @@ export class GameController {
     });
   }
 
-  private awakenMotherIfDormant(): boolean {
+  private awakenMotherIfDormant(asMobile = false): boolean {
     if (this.bootPoweredOn) {
       void this.audio.unlock();
       return false;
     }
+    this.mobileMode = asMobile;
+    this.bezelState.sasEnabled = false;
+    if (asMobile) {
+      this.manualZoom = 2.15;
+      this.currentZoom = 2.15;
+    }
     this.bootPoweredOn = true;
+    this.bootElapsedSec = 0;
+    this.bootModeSwitchPlayed = false;
     this.crtWarmupProgress = 0.04;
     this.bootProgressChars = 0;
-    this.glitchIntensity = 0.45;
+    this.bootTransitionPlayed = false;
+    this.glitchIntensity = 0.88;
     void this.audio.unlock().then(() => {
       this.audio.playAlienBootAwakening();
     });
@@ -258,27 +407,50 @@ export class GameController {
 
     window.addEventListener('blur', () => {
       this.keysDown.clear();
+      this.activeTouchPointers.clear();
     });
+
+    const releaseTouchPointer = (ev: PointerEvent) => {
+      this.activeTouchPointers.delete(ev.pointerId);
+    };
+    window.addEventListener('pointerup', releaseTouchPointer);
+    window.addEventListener('pointercancel', releaseTouchPointer);
 
     window.addEventListener('pointermove', (e) => {
       this.pointerClient.x = e.clientX;
       this.pointerClient.y = e.clientY;
 
       const mapped = this.webglCrt.mapClientToCrtUv(
-        e.clientX,
-        e.clientY,
+        e.clientX - this.canvasOffsetX,
+        e.clientY - this.canvasOffsetY,
         this.crtRect,
         this.bezelState.crtIntensity
       );
       this.pointerInsideCrt = mapped.inside;
-      this.cursorCrtPx.x = mapped.u * this.crtRect.width;
-      this.cursorCrtPx.y = mapped.v * this.crtRect.height;
+      const cx = mapped.u * this.crtRect.width;
+      const cy = mapped.v * this.crtRect.height;
 
-      this.hoveredHudButtonId = this.hitTestHudButtons(this.cursorCrtPx.x, this.cursorCrtPx.y);
+      // Allow sliding a held thumb smoothly between Roll L / Brake / Roll R or Thrust / Overdrive!
+      if (this.activeTouchPointers.has(e.pointerId)) {
+        const slidCtrl = this.hitTestTouchControls(cx, cy);
+        if (slidCtrl) {
+          this.activeTouchPointers.set(e.pointerId, slidCtrl);
+        } else {
+          this.activeTouchPointers.delete(e.pointerId);
+        }
+        return;
+      }
+
+      if (!this.mobileMode) {
+        this.cursorCrtPx.x = cx;
+        this.cursorCrtPx.y = cy;
+        this.hoveredHudButtonId = this.hitTestHudButtons(cx, cy);
+      }
 
       if (this.hoveredHudButtonId !== null) {
         document.body.style.cursor = 'pointer';
       } else if (
+        !this.mobileMode &&
         this.pointerInsideCrt &&
         this.phase === 'FLIGHT' &&
         !this.bezelState.flightLogsOpen &&
@@ -291,24 +463,40 @@ export class GameController {
     });
 
     window.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      if (this.phase === 'BOOT' && !this.bootPoweredOn) {
-        this.awakenMotherIfDormant();
-        return;
-      }
-      void this.audio.unlock();
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
 
-      // 1. CRT Terminal & On-Screen TV OSD Buttons inside curved glass
       const mapped = this.webglCrt.mapClientToCrtUv(
-        e.clientX,
-        e.clientY,
+        e.clientX - this.canvasOffsetX,
+        e.clientY - this.canvasOffsetY,
         this.crtRect,
         this.bezelState.crtIntensity
       );
-      if (!mapped.inside) return;
-
       const cx = mapped.u * this.crtRect.width;
       const cy = mapped.v * this.crtRect.height;
+
+      if (this.phase === 'BOOT' && !this.bootPoweredOn) {
+        const dormantBtn = mapped.inside ? this.hitTestHudButtons(cx, cy) : null;
+        this.awakenMotherIfDormant(dormantBtn === 'boot-awaken-mobile');
+        return;
+      }
+      void this.audio.unlock();
+      if (!mapped.inside) return;
+
+      // 1. Mobile Multi-Touch Hold Flight Pads (Roll L/R, Brake, Thrust, Overdrive)
+      if (
+        this.mobileMode &&
+        this.phase === 'FLIGHT' &&
+        !this.bezelState.flightLogsOpen &&
+        !this.bezelState.osdMenuOpen
+      ) {
+        const touchHold = this.hitTestTouchControls(cx, cy);
+        if (touchHold) {
+          this.activeTouchPointers.set(e.pointerId, touchHold);
+          return;
+        }
+      }
+
+      // 2. CRT Terminal, Menu & On-Screen Buttons
       const hudBtn = this.hitTestHudButtons(cx, cy);
       if (hudBtn) {
         this.audio.playButtonLatchLock(0.96, 0.96);
@@ -316,13 +504,30 @@ export class GameController {
         return;
       }
 
-      // 2. Left-Click during Flight: Focused Directional LIDAR Ping toward cursor (costs 1 cell)!
+      if (this.phase === 'BOOT' && this.bootPoweredOn && this.bootElapsedSec >= 0.75) {
+        this.audio.playButtonLatchLock(0.94, 0.95);
+        this.advanceFromBoot();
+        return;
+      }
+
+      // 3. Tap / Left-Click during Flight: Aim Nose Spotlight & Fire Directional Radar Ping!
       if (
         this.phase === 'FLIGHT' &&
         !this.bezelState.flightLogsOpen &&
         !this.bezelState.osdMenuOpen &&
         this.lander.alive
       ) {
+        if (this.mobileMode) {
+          const corridor = MobileHudRenderer.getSafeCorridor(
+            this.crtRect.width,
+            this.crtRect.height,
+            this.safeAreaInsets,
+            this.isFullscreen
+          );
+          if (cy > corridor.bottomPx) return;
+        }
+        this.cursorCrtPx.x = cx;
+        this.cursorCrtPx.y = cy;
         const cam = this.buildCameraView();
         this.cursorWorld = this.worldRenderer.screenToWorld(cam, cx, cy);
         this.lander.spotlightAngle = Math.atan2(
@@ -374,12 +579,45 @@ export class GameController {
   }
 
   private handleHudButtonClick(id: string): void {
+    if (id.startsWith('menu-map-sec-')) {
+      const n = Number.parseInt(id.replace('menu-map-sec-', ''), 10);
+      if (n >= 1 && n <= SectorGenerator.CAMPAIGN_SECTOR_COUNT) {
+        this.selectedMenuMode = 'PRACTICE';
+        this.selectedStartSector = n;
+      }
+      return;
+    }
+
     switch (id) {
+      case 'hud-fullscreen-toggle':
+        this.toggleFullscreen();
+        break;
+      case 'touch-pulse':
+        if (this.phase === 'FLIGHT' && this.lander.alive) {
+          if (this.physics.triggerEmergencyThrustPulse(this.lander)) {
+            this.gameEmergencyPulseAvailable = false;
+            this.audio.playEmergencyThrustPulse();
+            this.glitchIntensity = Math.max(this.glitchIntensity, 0.55);
+            this.showStatusToast('!! 1X GAME EMERGENCY PULSE FIRED !!', 2.2);
+            this.logEvent(`1X GAME EMERGENCY PULSE FIRED ON ${this.sector.code}`);
+          } else {
+            this.showStatusToast('1X GAME PULSE ALREADY EXPENDED', 1.4);
+          }
+        }
+        break;
+      case 'callsign-focus-input':
+        this.focusMobileCallsignInput();
+        break;
+      case 'callsign-backspace':
+        this.callsignDraft = this.callsignDraft.slice(0, -1);
+        break;
       case 'hud-sas-toggle':
       case 'osd-sas-toggle':
         this.bezelState.sasEnabled = !this.bezelState.sasEnabled;
         this.showStatusToast(
-          `SAS ATTITUDE DAMPENER: ${this.bezelState.sasEnabled ? 'ENGAGED' : 'BYPASSED'}`
+          this.bezelState.sasEnabled
+            ? 'SAS ON: 50% GENTLE ROLL AUTHORITY (NO AUTO-LEVEL)'
+            : 'SAS OFF: 100% FULL ROLL AUTHORITY'
         );
         break;
       case 'hud-zoom-toggle':
@@ -402,7 +640,19 @@ export class GameController {
         }
         break;
       case 'osd-close':
+      case 'osd-resume':
         this.bezelState.osdMenuOpen = false;
+        if (this.phase === 'PAUSED') {
+          this.phase = 'FLIGHT';
+        }
+        break;
+      case 'osd-retry':
+        this.bezelState.osdMenuOpen = false;
+        this.manualJettisonAndRedeploy();
+        break;
+      case 'osd-abort':
+        this.bezelState.osdMenuOpen = false;
+        this.concludeMissionToManifest();
         break;
       case 'osd-crt-dec':
         this.bezelState.crtIntensity = Math.max(0, Math.round((this.bezelState.crtIntensity - 0.1) * 100) / 100);
@@ -440,18 +690,40 @@ export class GameController {
         this.bezelState.flightLogsOpen = false;
         break;
       case 'boot-awaken':
-        this.awakenMotherIfDormant();
+        this.awakenMotherIfDormant(false);
+        break;
+      case 'boot-awaken-mobile':
+        this.awakenMotherIfDormant(true);
         break;
       case 'boot-continue':
         this.advanceFromBoot();
         break;
+      case 'menu-select-ranked':
+        this.selectedMenuMode = 'RANKED_CAMPAIGN';
+        break;
+      case 'menu-select-practice':
+        this.selectedMenuMode = 'PRACTICE';
+        break;
+      case 'menu-select-endless':
+        this.selectedMenuMode = 'ENDLESS';
+        break;
+      case 'menu-commit':
+        if (this.selectedMenuMode === 'RANKED_CAMPAIGN') {
+          this.startCampaign(1, false);
+        } else if (this.selectedMenuMode === 'PRACTICE') {
+          this.startCampaign(this.selectedStartSector, true);
+        } else {
+          this.startEndlessDeepSurvey();
+        }
+        break;
       case 'menu-campaign':
-        this.startCampaign(this.selectedStartSector);
+        this.startCampaign(1, false);
         break;
       case 'menu-endless':
         this.startEndlessDeepSurvey();
         break;
       case 'menu-sector-cycle':
+        this.selectedMenuMode = 'PRACTICE';
         this.selectedStartSector =
           (this.selectedStartSector % SectorGenerator.CAMPAIGN_SECTOR_COUNT) + 1;
         break;
@@ -555,12 +827,29 @@ export class GameController {
       if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space') {
         this.audio.playButtonLatchLock(0.95, 0.9);
         this.bezelState.osdMenuOpen = false;
+        if (this.phase === 'PAUSED') {
+          this.phase = 'FLIGHT';
+        }
       } else if (e.code === 'ArrowLeft') {
         this.audio.playSfx('ui_keyclick');
         this.handleHudButtonClick('osd-crt-dec');
       } else if (e.code === 'ArrowRight') {
         this.audio.playSfx('ui_keyclick');
         this.handleHudButtonClick('osd-crt-inc');
+      } else if (
+        (this.phase === 'FLIGHT' || this.phase === 'PAUSED') &&
+        e.code === 'KeyR' &&
+        !e.repeat
+      ) {
+        this.audio.playButtonLatchLock();
+        this.handleHudButtonClick('osd-retry');
+      } else if (
+        (this.phase === 'FLIGHT' || this.phase === 'PAUSED' || this.phase === 'SECTOR_BRIEFING') &&
+        e.code === 'KeyQ' &&
+        !e.repeat
+      ) {
+        this.audio.playButtonLatchLock();
+        this.handleHudButtonClick('osd-abort');
       }
       return;
     }
@@ -587,18 +876,26 @@ export class GameController {
     if (this.phase === 'TITLE_MENU') {
       if (e.code === 'ArrowUp' || e.code === 'KeyW') {
         this.menuCursor = (this.menuCursor + 3) % 4;
+        const modes: MenuModeSelection[] = ['RANKED_CAMPAIGN', 'PRACTICE', 'ENDLESS', this.selectedMenuMode];
+        this.selectedMenuMode = modes[this.menuCursor];
         this.audio.playSfx('ui_keyclick');
       } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
         this.menuCursor = (this.menuCursor + 1) % 4;
+        const modes: MenuModeSelection[] = ['RANKED_CAMPAIGN', 'PRACTICE', 'ENDLESS', this.selectedMenuMode];
+        this.selectedMenuMode = modes[this.menuCursor];
         this.audio.playSfx('ui_keyclick');
       } else if (e.code === 'Digit1') {
         this.audio.playButtonLatchLock();
-        this.startCampaign(this.selectedStartSector);
+        this.selectedMenuMode = 'RANKED_CAMPAIGN';
       } else if (e.code === 'Digit2') {
         this.audio.playButtonLatchLock();
-        this.startEndlessDeepSurvey();
-      } else if (e.code === 'Digit3' || e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
+        this.selectedMenuMode = 'PRACTICE';
+      } else if (e.code === 'Digit3') {
+        this.audio.playButtonLatchLock();
+        this.selectedMenuMode = 'ENDLESS';
+      } else if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
         this.audio.playButtonLatchLock(1.04, 0.85);
+        this.selectedMenuMode = 'PRACTICE';
         const delta = e.code === 'ArrowLeft' ? -1 : 1;
         this.selectedStartSector =
           ((this.selectedStartSector - 1 + delta + 6) % 6) + 1;
@@ -607,8 +904,7 @@ export class GameController {
         this.bezelState.flightLogsOpen = true;
       } else if (e.code === 'Enter' || e.code === 'Space') {
         this.audio.playButtonLatchLock();
-        const ids = ['menu-campaign', 'menu-endless', 'menu-sector-cycle', 'menu-logs'];
-        this.handleHudButtonClick(ids[this.menuCursor]);
+        this.handleHudButtonClick('menu-commit');
       }
       return;
     }
@@ -718,25 +1014,29 @@ export class GameController {
   }
 
   private advanceFromBoot(): void {
-    const totalBootChars = BOOT_LINES.reduce((acc, s) => acc + s.length, 0);
-    if (this.bootProgressChars < totalBootChars) {
-      this.bootProgressChars = totalBootChars;
-      if (!this.bootTransitionPlayed) {
-        this.bootTransitionPlayed = true;
-        this.audio.playScaryComputerTransition('dark');
-      }
+    if (this.bootElapsedSec < 0.65) {
       return;
     }
+
+    // If clicked/Space during the Red Logo draw, transition cleanly into the Interface Awakening Protocol
+    if (this.bootElapsedSec < BOOT_TIMING.PROTOCOL_START_SEC) {
+      this.bootElapsedSec = BOOT_TIMING.PROTOCOL_START_SEC;
+      this.bootModeSwitchPlayed = true;
+      this.glitchIntensity = Math.max(this.glitchIntensity, 0.32);
+      return;
+    }
+
+    // In Interface Awakening Protocol: clicking or pressing Space brings the player directly to the Main Menu!
     this.bootTransitionPlayed = true;
-    this.audio.playScaryComputerTransition('dark');
-    this.audio.playAlienComputerActivity(0.5);
+    this.glitchIntensity = Math.max(this.glitchIntensity, 0.24);
+    this.audio.playScaryComputerTransition('dark', 0, 0.42);
     this.menuCursor = 0;
     this.phase = 'TITLE_MENU';
   }
 
-  private startCampaign(startSector: number): void {
+  private startCampaign(startSector: number, practiceMode = startSector > 1): void {
     this.endlessMode = false;
-    this.isPracticeRun = startSector > 1;
+    this.isPracticeRun = practiceMode;
     this.manifestTab = 'CAMPAIGN';
     this.lives = this.maxLives;
     this.lifeLostFlashTimer = 0;
@@ -747,6 +1047,7 @@ export class GameController {
     this.highestSectorNum = startSector;
     this.accuracySamples = [];
     this.scoreSubmittedForRun = false;
+    this.lastSubmittedRun = null;
     this.uplinkSubmitState = 'IDLE';
     this.uplinkConfirmText = null;
     this.loadSector(SectorGenerator.createCampaignSector(startSector));
@@ -767,6 +1068,7 @@ export class GameController {
     this.highestSectorNum = 1;
     this.accuracySamples = [];
     this.scoreSubmittedForRun = false;
+    this.lastSubmittedRun = null;
     this.uplinkSubmitState = 'IDLE';
     this.uplinkConfirmText = null;
     this.loadSector(SectorGenerator.createEndlessSector(this.endlessDepth, this.endlessSeed));
@@ -780,8 +1082,9 @@ export class GameController {
     this.lander = this.physics.createInitialLander(sec);
     this.lander.emergencyPulseAvailable = this.gameEmergencyPulseAvailable;
     this.cameraPos = { ...this.lander.pos };
-    this.manualZoom = 1.08;
-    this.currentZoom = 1.08;
+    this.manualZoom = this.mobileMode ? 2.15 : 1.08;
+    this.currentZoom = this.manualZoom;
+    this.activeTouchPointers.clear();
     this.sectorElapsedSec = 0;
     this.briefingProgressChars = 0;
     this.avionicsBeepTimer = 0;
@@ -797,6 +1100,7 @@ export class GameController {
   }
 
   private beginSectorFlight(): void {
+    this.audio.fadeOutBootStartupAudio(1.1);
     this.phase = 'FLIGHT';
     this.audio.playScaryComputerTransition('engage');
   }
@@ -842,6 +1146,8 @@ export class GameController {
     this.lander = this.physics.createInitialLander(fresh);
     this.lander.emergencyPulseAvailable = this.gameEmergencyPulseAvailable;
     this.cameraPos = { ...this.lander.pos };
+    this.currentZoom = this.manualZoom;
+    this.activeTouchPointers.clear();
     this.sectorElapsedSec = 0;
     this.avionicsBeepTimer = 0;
     this.hadActiveAvionicsWarning = false;
@@ -986,6 +1292,12 @@ export class GameController {
   }
 
   private advanceAfterTally(): void {
+    // Practice Mode plays ONLY the selected map and returns directly to the Main Menu upon completion!
+    if (this.isPracticeRun) {
+      this.phase = 'TITLE_MENU';
+      return;
+    }
+
     if (this.endlessMode) {
       this.endlessDepth += 1;
       this.loadSector(SectorGenerator.createEndlessSector(this.endlessDepth, this.endlessSeed));
@@ -1046,6 +1358,18 @@ export class GameController {
     });
 
     const rankStr = `#${String(result.rank).padStart(2, '0')}`;
+    this.lastSubmittedRun = {
+      docId: result.docId,
+      callsign: trimmed,
+      score: Math.round(this.missionScore),
+      sector: this.highestSectorNum,
+      highestSector: formatSectorCode(this.highestSectorNum, mode),
+      accuracyRating: avg.rating,
+      accuracyPercent: avg.percent,
+      mode,
+      rank: result.rank,
+    };
+
     if (result.ok) {
       this.uplinkSubmitState = 'CONFIRMED';
       this.uplinkConfirmText = `UPLINK CONFIRMED // ${mode} RANK ${rankStr}`;
@@ -1125,6 +1449,32 @@ export class GameController {
   }
 
   private buildCameraView(): CameraView {
+    if (this.mobileMode) {
+      const corridor = MobileHudRenderer.getSafeCorridor(
+        this.crtRect.width,
+        this.crtRect.height,
+        this.safeAreaInsets,
+        this.isFullscreen
+      );
+      const availW = Math.max(260, this.crtRect.width - 16);
+      const availH = Math.max(180, corridor.bottomPx - corridor.topPx);
+      const fitPxPerM = Math.min(
+        availW / Math.max(380, this.sector.worldWidth + 10),
+        availH / Math.max(210, this.sector.worldHeight + 12)
+      );
+      // Punchier world scale on narrow phone screens while panning cleanly with the shuttle
+      const basePxPerM = Math.max(1.58, fitPxPerM);
+      const pxPerMeter = basePxPerM * this.currentZoom;
+      return {
+        x: this.cameraPos.x,
+        y: this.cameraPos.y,
+        zoom: this.currentZoom,
+        pxPerMeter,
+        widthPx: this.crtRect.width,
+        heightPx: this.crtRect.height,
+      };
+    }
+
     const layout = HudRenderer.computeLayoutMetrics(this.crtRect.width, this.crtRect.height);
     // Fit the full sector width cleanly inside the central safe corridor between Left & Right HUDs at 1.0x zoom!
     const basePxPerM = Math.min(
@@ -1170,9 +1520,12 @@ export class GameController {
       this.displayedScore = this.missionScore;
     }
 
-    // Typewriter progressions & 1979 Alien computer / ASMR muted clacking
-    if (this.bootPoweredOn && this.crtWarmupProgress < 1) {
-      this.crtWarmupProgress = Math.min(1, this.crtWarmupProgress + dt * 2.2);
+    // Typewriter progressions & 1979 Alien computer startup sequence choreography
+    if (this.bootPoweredOn) {
+      this.bootElapsedSec += dt;
+      if (this.crtWarmupProgress < 1) {
+        this.crtWarmupProgress = Math.min(1, this.crtWarmupProgress + dt * 2.2);
+      }
     }
 
     if (this.bootPoweredOn && this.phase !== 'BOOT') {
@@ -1183,20 +1536,26 @@ export class GameController {
       }
     }
 
-    if (this.phase === 'BOOT' && this.bootPoweredOn && this.crtWarmupProgress > 0.45) {
-      const totalBoot = BOOT_LINES.reduce((acc, s) => acc + s.length, 0);
-      if (this.bootProgressChars < totalBoot) {
-        const prev = this.bootProgressChars;
-        this.bootProgressChars = Math.min(totalBoot, this.bootProgressChars + dt * 48);
-        if (Math.floor(this.bootProgressChars / 2.6) > Math.floor(prev / 2.6)) {
-          this.audio.playAsmrScrollClack(0.86);
-        }
-        if (Math.floor(this.bootProgressChars / 155) > Math.floor(prev / 155)) {
-          this.audio.playAlienComputerActivity(0.32);
-        }
-        if (this.bootProgressChars >= totalBoot && !this.bootTransitionPlayed) {
-          this.bootTransitionPlayed = true;
-          this.audio.playScaryComputerTransition('dark');
+    if (this.phase === 'BOOT' && this.bootPoweredOn) {
+      if (
+        this.bootElapsedSec >= BOOT_TIMING.LOGO_HOLD_END_SEC &&
+        !this.bootModeSwitchPlayed
+      ) {
+        this.bootModeSwitchPlayed = true;
+        this.glitchIntensity = Math.max(this.glitchIntensity, 0.36);
+      }
+
+      if (this.bootElapsedSec >= BOOT_TIMING.PROTOCOL_START_SEC) {
+        const totalBoot = BOOT_LINES.reduce((acc, s) => acc + s.length, 0);
+        if (this.bootProgressChars < totalBoot) {
+          const prev = this.bootProgressChars;
+          this.bootProgressChars = Math.min(totalBoot, this.bootProgressChars + dt * 52);
+          if (Math.floor(this.bootProgressChars / 2.8) > Math.floor(prev / 2.8)) {
+            this.audio.playAsmrScrollClack(0.72);
+          }
+          if (this.bootProgressChars >= totalBoot && !this.bootTransitionPlayed) {
+            this.bootTransitionPlayed = true;
+          }
         }
       }
     } else if (this.phase === 'SECTOR_BRIEFING') {
@@ -1233,22 +1592,28 @@ export class GameController {
       !modalPaused;
 
     let interpAlpha = 1;
+    const mobileTouch = this.getMobileTouchState();
     if (simActive) {
       this.simAccumulator += dt;
       const throttleUp =
-        this.phase === 'FLIGHT' && (this.keysDown.has('KeyW') || this.keysDown.has('ArrowUp'));
+        this.phase === 'FLIGHT' &&
+        (this.keysDown.has('KeyW') || this.keysDown.has('ArrowUp') || mobileTouch.thrust);
       if (throttleUp && !this.wasMainEngineLit && this.lander.alive && this.lander.fuelKg > 0.5 && this.lander.throttle < 0.12) {
         this.audio.playSfx('thruster_ignite', { pitch: 0.9, volume: 0.68 });
       }
       this.wasMainEngineLit = throttleUp;
       const overdrive =
-        throttleUp && (this.keysDown.has('ShiftLeft') || this.keysDown.has('ShiftRight'));
+        throttleUp &&
+        (this.keysDown.has('ShiftLeft') || this.keysDown.has('ShiftRight') || mobileTouch.overdrive);
       const rotateLeft =
-        this.phase === 'FLIGHT' && (this.keysDown.has('KeyA') || this.keysDown.has('ArrowLeft'));
+        this.phase === 'FLIGHT' &&
+        (this.keysDown.has('KeyA') || this.keysDown.has('ArrowLeft') || mobileTouch.rollLeft);
       const rotateRight =
-        this.phase === 'FLIGHT' && (this.keysDown.has('KeyD') || this.keysDown.has('ArrowRight'));
+        this.phase === 'FLIGHT' &&
+        (this.keysDown.has('KeyD') || this.keysDown.has('ArrowRight') || mobileTouch.rollRight);
       const retroStabilizer =
-        this.phase === 'FLIGHT' && (this.keysDown.has('KeyS') || this.keysDown.has('ArrowDown'));
+        this.phase === 'FLIGHT' &&
+        (this.keysDown.has('KeyS') || this.keysDown.has('ArrowDown') || mobileTouch.retro);
 
       while (this.simAccumulator >= PHYSICS.FIXED_DT) {
         this.simAccumulator -= PHYSICS.FIXED_DT;
@@ -1389,7 +1754,9 @@ export class GameController {
       this.lander.retroActive
         ? 0.95
         : this.lander.rcsLeftActive || this.lander.rcsRightActive
-          ? 0.75
+          ? this.bezelState.sasEnabled
+            ? 0.42
+            : 0.75
           : 0;
     const windSpd = Math.hypot(this.lander.currentWindVx, this.lander.currentWindVy);
     this.audio.updateFlightDsp(
@@ -1398,7 +1765,8 @@ export class GameController {
       rcsInt,
       windSpd,
       this.phase === 'FLIGHT' && this.lander.alive && !modalPaused,
-      this.sector.darknessLevel
+      this.sector.darknessLevel,
+      dt
     );
 
     // Smooth Tactical Camera Tracking + Auto-Zoom Approach Interpolation
@@ -1413,7 +1781,7 @@ export class GameController {
 
     const cam = this.buildCameraView();
 
-    if (this.phase !== 'BOOT') {
+    if (this.phase !== 'BOOT' && this.phase !== 'TITLE_MENU') {
       this.worldRenderer.render(
         oCtx,
         cam,
@@ -1453,9 +1821,15 @@ export class GameController {
       highestSectorCode: this.highestSectorCode,
       avgAccuracyPercent: avgAcc.percent,
       avgAccuracyRating: avgAcc.rating,
+      selectedMenuMode: this.selectedMenuMode,
       selectedStartSector: this.selectedStartSector,
       menuCursor: this.menuCursor,
+      mobileMode: this.mobileMode,
+      isFullscreen: this.isFullscreen,
+      safeAreaInsets: this.safeAreaInsets,
+      mobileTouchState: mobileTouch,
       bootPoweredOn: this.bootPoweredOn,
+      bootElapsedSec: this.bootElapsedSec,
       crtWarmupProgress: this.crtWarmupProgress,
       bootProgressChars: this.bootProgressChars,
       briefingProgressChars: this.briefingProgressChars,
@@ -1476,6 +1850,7 @@ export class GameController {
       manifestTab: this.manifestTab,
       manifestEntries: manifestView.entries,
       manifestShowingArchive: manifestView.showingArchiveFallback,
+      lastSubmittedRun: this.lastSubmittedRun,
       uplinkSubmitState: this.uplinkSubmitState,
       uplinkConfirmText: this.uplinkConfirmText,
       sessionLogs: this.sessionLogs,
@@ -1496,6 +1871,11 @@ export class GameController {
             : Math.max(0, (this.lander.throttle - 0.82) * 0.85)
         : 0;
 
+    const tubeTurnOn =
+      this.phase === 'BOOT' && this.bootPoweredOn && this.bootElapsedSec < 1.05
+        ? Math.pow(1 - this.bootElapsedSec / 1.05, 1.35)
+        : 0;
+
     this.webglCrt.render(
       this.offscreenCrtCanvas,
       this.crtRect,
@@ -1504,25 +1884,38 @@ export class GameController {
       this.bezelState.crtIntensity,
       emStorm.shaderInterference,
       this.glitchIntensity,
-      overdriveAmt
+      overdriveAmt,
+      tubeTurnOn
     );
   }
 
   private updateCamera(dt: number): void {
     let targetZoom = this.manualZoom;
     let minPadDist = Infinity;
+    let closestPad: LandingPad | null = null;
     for (const pad of this.sector.pads) {
       const cx = (pad.x1 + pad.x2) * 0.5;
       const d = Math.hypot(
         this.lander.pos.x - cx,
         this.lander.pos.y + PHYSICS.STRUT_REST_BOTTOM_Y - pad.y
       );
-      if (d < minPadDist) minPadDist = d;
+      if (d < minPadDist) {
+        minPadDist = d;
+        closestPad = pad;
+      }
     }
 
     if (this.bezelState.autoZoomEnabled && this.phase === 'FLIGHT' && this.lander.alive) {
-      // Smoothly zoom in when within approach gate of any pad
-      if (minPadDist < PHYSICS.APPROACH_PROXIMITY_M) {
+      if (this.mobileMode) {
+        // Aggressive mobile zoom: 2.15x base flight -> smooth ramp starting at 130m up to ~3.95x close-up on pad
+        const mobileGateM = 130;
+        if (minPadDist < mobileGateM) {
+          const approachFactor = 1 - minPadDist / mobileGateM;
+          const autoTarget = 2.15 + Math.pow(approachFactor, 0.78) * 1.80;
+          targetZoom = Math.max(this.manualZoom, autoTarget);
+        }
+      } else if (minPadDist < PHYSICS.APPROACH_PROXIMITY_M) {
+        // Smoothly zoom in when within approach gate of any pad
         const approachFactor = 1 - minPadDist / PHYSICS.APPROACH_PROXIMITY_M;
         const autoTarget = 1.15 + approachFactor * 1.35; // Up to ~2.5x automatic precision view
         targetZoom = Math.max(this.manualZoom, autoTarget);
@@ -1531,11 +1924,60 @@ export class GameController {
       targetZoom = 1.05;
     }
 
-    this.currentZoom += (targetZoom - this.currentZoom) * Math.min(1, dt * 3.8);
+    const zoomLerpRate = this.mobileMode ? 4.8 : 3.8;
+    this.currentZoom += (targetZoom - this.currentZoom) * Math.min(1, dt * zoomLerpRate);
 
     // Camera tracking bounded to the Safe Central Flight Corridor between Left/Right/Top/Bottom HUDs
     // so the craft NEVER slips behind any HUD panel even when zoomed out or near sector walls!
     const cam = this.buildCameraView();
+    if (this.mobileMode) {
+      const corridor = MobileHudRenderer.getSafeCorridor(
+        this.crtRect.width,
+        this.crtRect.height,
+        this.safeAreaInsets,
+        this.isFullscreen
+      );
+      const effTopPx =
+        minPadDist <= PHYSICS.APPROACH_PROXIMITY_M ? corridor.topPx + 60 : corridor.topPx;
+      const effBotPx = Math.max(effTopPx + 90, corridor.bottomPx - 20);
+      const visCenterScreenY = (effTopPx + effBotPx) * 0.5;
+      const yScreenBiasM = (cam.heightPx * 0.5 - visCenterScreenY) / cam.pxPerMeter;
+
+      let focusWorldY = this.lander.pos.y + this.lander.vel.y * 0.55 - 7;
+      if (closestPad && minPadDist < 85 && this.lander.pos.y >= closestPad.y - 4) {
+        const padBlend = (1 - minPadDist / 85) * 0.36;
+        focusWorldY =
+          (this.lander.pos.y + this.lander.vel.y * 0.35) * (1 - padBlend) +
+          (closestPad.y - 3) * padBlend;
+      }
+
+      let mX = Math.max(
+        20,
+        Math.min(this.sector.worldWidth - 20, this.lander.pos.x + this.lander.vel.x * 0.75)
+      );
+      let mY = Math.max(
+        14,
+        Math.min(this.sector.worldHeight - 8, focusWorldY - yScreenBiasM)
+      );
+
+      if (this.lander.alive) {
+        const halfW = Math.max(8, (this.crtRect.width * 0.5 - 20) / cam.pxPerMeter);
+        mX = Math.max(this.lander.pos.x - halfW, Math.min(this.lander.pos.x + halfW, mX));
+
+        const minCamY =
+          this.lander.pos.y - (cam.heightPx * 0.5 - effTopPx - 28) / cam.pxPerMeter;
+        const maxCamY =
+          this.lander.pos.y + (effBotPx - 32 - cam.heightPx * 0.5) / cam.pxPerMeter;
+        if (minCamY <= maxCamY) {
+          mY = Math.max(minCamY, Math.min(maxCamY, mY));
+        }
+      }
+
+      this.cameraPos.x += (mX - this.cameraPos.x) * Math.min(1, dt * 7.0);
+      this.cameraPos.y += (mY - this.cameraPos.y) * Math.min(1, dt * 7.0);
+      return;
+    }
+
     const layout = HudRenderer.computeLayoutMetrics(this.crtRect.width, this.crtRect.height);
     const halfSafeW = layout.safeWidthPx / (2 * cam.pxPerMeter);
     const halfFullH = (cam.heightPx - layout.topHeaderY - 56) / (2 * cam.pxPerMeter);

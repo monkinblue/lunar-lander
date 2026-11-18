@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="USCSS Nostromo / MU-TH-UR 6000 retro-futuristic vector Lunar Lander descent simulation.">
   <meta name="theme-color" content="#030A05">
   <title>INTERFACE 2037 // USCSS NOSTROMO DESCENT TELEMETRY</title>
@@ -55,9 +57,23 @@
       USCSS Nostromo Descent Telemetry requires HTML5 Canvas and WebGL support.
     </canvas>
 
+    <!-- Native mobile virtual-keyboard bridge for Callsign Uplink on phones -->
+    <input
+      id="mobile-callsign-input"
+      type="text"
+      maxlength="16"
+      autocapitalize="characters"
+      autocomplete="off"
+      autocorrect="off"
+      spellcheck="false"
+      enterkeyhint="send"
+      aria-label="Pilot Callsign Input"
+    >
+    <div id="safe-area-probe" aria-hidden="true"></div>
+
     <!-- Keyboard-accessible mirror buttons for console OSD switches (WCAG Audio & Control Parity) -->
     <nav class="sr-only" aria-label="Console Hardware Switches">
-      <button type="button" id="a11y-sas-toggle">Toggle SAS Attitude Dampener</button>
+      <button type="button" id="a11y-sas-toggle">Toggle SAS 50% Gentle Roll Authority</button>
       <button type="button" id="a11y-zoom-toggle">Toggle Auto-Zoom Approach</button>
       <button type="button" id="a11y-crt-step">Cycle CRT Glass and Bloom Intensity</button>
       <button type="button" id="a11y-mute-toggle">Toggle Intercom and Audio Bus Mute</button>

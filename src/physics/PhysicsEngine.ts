@@ -177,6 +177,10 @@ export class PhysicsEngine {
       lander.groundedTime = 0;
       lander.refuelingActive = false;
     }
+    this.hadPadContact = false;
+    this.firstContactPeakVs = 0;
+    this.firstContactPeakHs = 0;
+    this.firstContactPeakDeg = 0;
 
     const ax = Math.sin(lander.angle);
     const ay = Math.cos(lander.angle);
@@ -382,27 +386,25 @@ export class PhysicsEngine {
       ? 0.72 + 0.1 * Math.sin(this.simTime * 19)
       : 1.0;
 
+    // SAS Mode: 50% half-force gentle manual attitude/roll authority (no automatic damping/correction)
+    const rollAuthority = input.sasEnabled ? 0.5 : 1.0;
+
     let rotCmd = 0;
     if (input.rotateLeft && !this.touchdownLocked) rotCmd -= 1;
     if (input.rotateRight && !this.touchdownLocked) rotCmd += 1;
 
     if (rotCmd !== 0 && hasFuel) {
-      torque += rotCmd * PHYSICS.RCS_TORQUE_NM * rcsHealthFactor;
-      lander.fuelKg = Math.max(0, lander.fuelKg - PHYSICS.RCS_BURN_RATE_KG_S * dt);
+      torque += rotCmd * PHYSICS.RCS_TORQUE_NM * rollAuthority * rcsHealthFactor;
+      lander.fuelKg = Math.max(
+        0,
+        lander.fuelKg - PHYSICS.RCS_BURN_RATE_KG_S * rollAuthority * dt
+      );
       if (rotCmd < 0) lander.rcsLeftActive = true;
       if (rotCmd > 0) lander.rcsRightActive = true;
-    } else if (input.sasEnabled && !input.retroStabilizer && hasFuel && Math.abs(lander.angularVel) > 0.012) {
-      // Bezel [SAS ATTITUDE DAMPENER]
-      const dampSign = -Math.sign(lander.angularVel);
-      const dampMag = Math.min(PHYSICS.SAS_DAMPING_TORQUE, Math.abs(lander.angularVel) * 9500);
-      torque += dampSign * dampMag * rcsHealthFactor;
-      lander.fuelKg = Math.max(0, lander.fuelKg - PHYSICS.SAS_BURN_RATE_KG_S * (dampMag / PHYSICS.SAS_DAMPING_TORQUE) * dt);
-      if (dampSign < 0) lander.rcsLeftActive = true;
-      if (dampSign > 0) lander.rcsRightActive = true;
     }
 
-    // Gimbaled main thruster vectoring
-    const targetGimbal = rotCmd * 0.14;
+    // Gimbaled main thruster vectoring (scaled by SAS 50% gentle control authority)
+    const targetGimbal = rotCmd * 0.14 * rollAuthority;
     lander.gimbalAngle += (targetGimbal - lander.gimbalAngle) * Math.min(1, dt * 12);
 
     // Forces accumulator
@@ -491,10 +493,10 @@ export class PhysicsEngine {
       }
     }
 
-    // Vertical Thermal Updraft Vents (Sector 06 & Deep-Survey)
+    // Vertical Thermal / Upward Gravity Columns (Sector 06 & Deep-Survey) — High-Impact Upward Surge!
     lander.inThermalUpdraft = false;
     for (const vent of sector.thermalVents) {
-      const halfW = vent.width * 0.5 + 1.8;
+      const halfW = vent.width * 0.5 + 2.4;
       if (
         Math.abs(lander.pos.x - vent.x) <= halfW &&
         lander.pos.y >= vent.y &&
@@ -502,9 +504,12 @@ export class PhysicsEngine {
       ) {
         lander.inThermalUpdraft = true;
         const heightRatio = 1 - (lander.pos.y - vent.y) / vent.maxHeight;
-        const pulse = 0.75 + 0.25 * Math.sin(this.simTime * 3.4 + vent.phase);
-        forceY += totalMass * vent.updraftAccel * (0.45 + 0.55 * heightRatio) * pulse;
-        torque += Math.sin(this.simTime * 11 + vent.phase) * 680 * heightRatio;
+        const centerFactor = 1 - Math.min(1, Math.abs(lander.pos.x - vent.x) / halfW) * 0.28;
+        const pulse = 0.86 + 0.14 * Math.sin(this.simTime * 4.2 + vent.phase);
+        const upwardSurge = vent.updraftAccel * (0.72 + 0.48 * heightRatio) * centerFactor * pulse;
+        const relUpLift = Math.max(0, 9.5 - lander.vel.y) * 0.42;
+        forceY += totalMass * (upwardSurge + relUpLift);
+        torque += Math.sin(this.simTime * 11 + vent.phase) * 1450 * (0.45 + 0.55 * heightRatio);
       }
     }
 
@@ -634,12 +639,16 @@ export class PhysicsEngine {
     const penR = floorYR - restFootR.y;
 
     if (penL <= 0 && penR <= 0) {
-      // Airborne: relax spring struts smoothly back to extended position
+      // Airborne: relax spring struts smoothly back to extended position & reset pad contact state
       lander.strutCompressionL = Math.max(0, lander.strutCompressionL - dt * 4.5);
       lander.strutCompressionR = Math.max(0, lander.strutCompressionR - dt * 4.5);
       lander.groundedPad = null;
       lander.groundedTime = 0;
       lander.refuelingActive = false;
+      this.hadPadContact = false;
+      this.firstContactPeakVs = 0;
+      this.firstContactPeakHs = 0;
+      this.firstContactPeakDeg = 0;
       return;
     }
 
@@ -678,34 +687,41 @@ export class PhysicsEngine {
     }
 
     // Footpads are over a valid Landing Pad!
+    // Enforce fatal NO-GO envelope on EVERY contact frame (never allow >13.5 deg attitude or fatal V/S / H/S to survive!)
+    const checkVs = this.hadPadContact ? Math.max(this.firstContactPeakVs, impactVs) : impactVs;
+    const checkHs = this.hadPadContact ? Math.max(this.firstContactPeakHs, impactHs) : impactHs;
+    const checkDeg = this.hadPadContact ? Math.max(this.firstContactPeakDeg, impactDeg) : impactDeg;
+
+    if (
+      checkVs > PHYSICS.SURVIVAL_VS_MAX ||
+      checkHs > PHYSICS.SURVIVAL_HS_MAX ||
+      checkDeg > PHYSICS.SURVIVAL_ANGLE_DEG
+    ) {
+      this.firstContactPeakVs = checkVs;
+      this.firstContactPeakHs = checkHs;
+      this.firstContactPeakDeg = checkDeg;
+      const failReason =
+        checkVs > PHYSICS.SURVIVAL_VS_MAX
+          ? `EXCESSIVE DESCENT RATE (${checkVs.toFixed(1)} M/S)`
+          : checkHs > PHYSICS.SURVIVAL_HS_MAX
+            ? `EXCESSIVE LATERAL DRIFT (${checkHs.toFixed(1)} M/S)`
+            : `CRITICAL ATTITUDE ANGLE (${checkDeg.toFixed(1)}°)`;
+      this.triggerCatastrophicBreakup(lander, failReason, events, matchedPad);
+      return;
+    }
+
     if (!this.hadPadContact) {
       this.hadPadContact = true;
       this.firstContactPeakVs = impactVs;
       this.firstContactPeakHs = impactHs;
       this.firstContactPeakDeg = impactDeg;
 
-      // Evaluate catastrophic vs hard survival vs clean contact on initial touchdown
-      if (
-        impactVs > PHYSICS.SURVIVAL_VS_MAX ||
-        impactHs > PHYSICS.SURVIVAL_HS_MAX ||
-        impactDeg > PHYSICS.SURVIVAL_ANGLE_DEG
-      ) {
-        const failReason =
-          impactVs > PHYSICS.SURVIVAL_VS_MAX
-            ? `EXCESSIVE DESCENT RATE (${impactVs.toFixed(1)} M/S)`
-            : impactHs > PHYSICS.SURVIVAL_HS_MAX
-              ? `EXCESSIVE LATERAL DRIFT (${impactHs.toFixed(1)} M/S)`
-              : `CRITICAL ATTITUDE ANGLE (${impactDeg.toFixed(1)}°)`;
-        this.triggerCatastrophicBreakup(lander, failReason, events);
-        return;
-      }
-
       if (
         impactVs > PHYSICS.SAFE_VS_MAX ||
         impactHs > PHYSICS.SAFE_HS_MAX ||
         impactDeg > PHYSICS.SAFE_ANGLE_DEG
       ) {
-        // Hard Survival Landing!
+        // Hard Survival (CAUTION) Landing!
         lander.tookSectorDamage = true;
         lander.strutDamaged = true;
         lander.rcsDamaged = true;
@@ -718,9 +734,9 @@ export class PhysicsEngine {
         events.onStrutContactThud?.(Math.min(1, 0.35 + impactVs / 2.5));
       }
     } else {
-      this.firstContactPeakVs = Math.max(this.firstContactPeakVs, impactVs);
-      this.firstContactPeakHs = Math.max(this.firstContactPeakHs, impactHs);
-      this.firstContactPeakDeg = Math.max(this.firstContactPeakDeg, impactDeg);
+      this.firstContactPeakVs = checkVs;
+      this.firstContactPeakHs = checkHs;
+      this.firstContactPeakDeg = checkDeg;
     }
 
     // Instant Magnetic Pad Friction Stop & Zero Wind-Draft Delay Upon Landing!
@@ -799,7 +815,8 @@ export class PhysicsEngine {
   private triggerCatastrophicBreakup(
     lander: LanderState,
     reason: string,
-    events: PhysicsEvents
+    events: PhysicsEvents,
+    pad: LandingPad | null = null
   ): void {
     if (!lander.alive) return;
     lander.alive = false;
@@ -859,12 +876,16 @@ export class PhysicsEngine {
 
     this.spawnSparks(lander.pos, 42);
 
+    const peakVs = Math.max(this.firstContactPeakVs, Math.abs(lander.vel.y));
+    const peakHs = Math.max(this.firstContactPeakHs, Math.abs(lander.vel.x));
+    const peakDeg = Math.max(this.firstContactPeakDeg, Math.abs((lander.angle * 180) / Math.PI));
+
     events.onCatastrophicBreach?.({
       grade: 'CATASTROPHIC',
-      pad: null,
-      impactVs: Math.abs(lander.vel.y),
-      impactHs: Math.abs(lander.vel.x),
-      impactDeg: Math.abs((lander.angle * 180) / Math.PI),
+      pad,
+      impactVs: peakVs,
+      impactHs: peakHs,
+      impactDeg: peakDeg,
       centerOffsetRatio: 1,
       reason,
     });

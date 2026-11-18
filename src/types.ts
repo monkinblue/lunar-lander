@@ -185,6 +185,15 @@ export interface SectorScoreBreakdown {
 
 export type LeaderboardMode = 'CAMPAIGN' | 'ENDLESS';
 
+export type MenuModeSelection = 'RANKED_CAMPAIGN' | 'PRACTICE' | 'ENDLESS';
+
+export interface SafeAreaInsets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
 export interface CrewManifestEntry {
   id?: string;
   callsign: string;
@@ -196,6 +205,18 @@ export interface CrewManifestEntry {
   mode: LeaderboardMode;
   date: string;
   isArchiveFallback?: boolean;
+}
+
+export interface LastSubmittedRun {
+  docId?: string;
+  callsign: string;
+  score: number;
+  sector: number;
+  highestSector: string;
+  accuracyRating: string;
+  accuracyPercent: number;
+  mode: LeaderboardMode;
+  rank: number;
 }
 
 export interface TouchdownSnapshot {
@@ -251,7 +272,7 @@ export type VoiceCalloutId =
   | 'voice_hull_breach';
 
 export type SfxId =
-  | 'screen_power_on'
+  | 'homeade_computer_start'
   | 'nostromo_boot_sequence'
   | 'computer_telemetry_chirp'
   | 'tape_drive_servo'

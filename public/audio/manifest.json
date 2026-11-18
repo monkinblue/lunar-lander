@@ -28,10 +28,10 @@
       "category": "loop",
       "bytes": 160957
     },
-    "screen_power_on": {
-      "path": "/audio/screen_power_on.mp3",
+    "homeade_computer_start": {
+      "path": "/audio/homeade_computer_start.m4a",
       "category": "sfx",
-      "bytes": 45182
+      "bytes": 225049
     },
     "nostromo_boot_sequence": {
       "path": "/audio/nostromo_boot_sequence.mp3",

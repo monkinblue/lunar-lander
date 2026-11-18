@@ -704,9 +704,9 @@ export class SectorGenerator {
     };
 
     const thermalVents: ThermalVent[] = [
-      { x: 186, y: sampleFloorAt(186), width: 15, maxHeight: 74, updraftAccel: 4.4, phase: 0.0 },
-      { x: 298, y: sampleFloorAt(298), width: 16, maxHeight: 76, updraftAccel: 4.8, phase: 2.1 },
-      { x: 356, y: sampleFloorAt(356), width: 14, maxHeight: 68, updraftAccel: 4.6, phase: 4.2 },
+      { x: 186, y: sampleFloorAt(186), width: 19, maxHeight: 102, updraftAccel: 9.8, phase: 0.0 },
+      { x: 298, y: sampleFloorAt(298), width: 20, maxHeight: 108, updraftAccel: 10.6, phase: 2.1 },
+      { x: 356, y: sampleFloorAt(356), width: 18, maxHeight: 96, updraftAccel: 10.2, phase: 4.2 },
     ];
 
     const windBands: WindBand[] = [
@@ -855,24 +855,26 @@ export class SectorGenerator {
 
     const thermalVents: ThermalVent[] = [];
     if (hasVents) {
-      const vx = 160 + rng() * 190;
-      const nearPad = pads.some((p) => Math.abs(vx - (p.x1 + p.x2) * 0.5) < 22);
-      if (!nearPad) {
-        let fy = 60;
-        for (let i = 0; i < terrain.length - 1; i++) {
-          if (vx >= terrain[i].x && vx <= terrain[i + 1].x) {
-            fy = (terrain[i].y + terrain[i + 1].y) * 0.5;
-            break;
+      const candidateXs = [155 + rng() * 85, 255 + rng() * 115];
+      for (const vx of candidateXs) {
+        const nearPad = pads.some((p) => Math.abs(vx - (p.x1 + p.x2) * 0.5) < 22);
+        if (!nearPad) {
+          let fy = 60;
+          for (let i = 0; i < terrain.length - 1; i++) {
+            if (vx >= terrain[i].x && vx <= terrain[i + 1].x) {
+              fy = (terrain[i].y + terrain[i + 1].y) * 0.5;
+              break;
+            }
           }
+          thermalVents.push({
+            x: vx,
+            y: fy,
+            width: 19,
+            maxHeight: 100,
+            updraftAccel: 9.8,
+            phase: rng() * 6,
+          });
         }
-        thermalVents.push({
-          x: vx,
-          y: fy,
-          width: 15,
-          maxHeight: 72,
-          updraftAccel: 4.3,
-          phase: rng() * 6,
-        });
       }
     }
 

@@ -164,7 +164,7 @@ export class WorldRenderer {
     ctx.save();
 
     if (sector.windBands.length > 1) {
-      ctx.font = 'bold 10px "JetBrains Mono", monospace';
+      ctx.font = 'bold 13.5px "JetBrains Mono", monospace';
       for (const band of sector.windBands) {
         if (band.minY > 5) {
           const left = this.worldToScreen(cam, 0, band.minY);
@@ -243,21 +243,21 @@ export class WorldRenderer {
       ctx.lineTo(baseC.x + halfWpx, baseC.y + 3);
       ctx.stroke();
 
-      const chevronCount = 6;
+      const chevronCount = 8;
       for (let i = 0; i < chevronCount; i++) {
-        const prog = (timeSec * 0.68 + vent.phase * 0.2 + i / chevronCount) % 1;
+        const prog = (timeSec * 1.15 + vent.phase * 0.2 + i / chevronCount) % 1;
         const wy = vent.y + prog * vent.maxHeight;
-        const sway = Math.sin(timeSec * 4 + prog * 6 + vent.phase) * 1.8;
+        const sway = Math.sin(timeSec * 4.5 + prog * 6 + vent.phase) * 1.6;
         const p = this.worldToScreen(cam, vent.x + sway, wy);
-        const alpha = Math.sin(prog * Math.PI) * 0.85;
-        const wSpan = halfWpx * (0.48 + prog * 0.45);
+        const alpha = Math.sin(prog * Math.PI) * 0.94;
+        const wSpan = halfWpx * (0.55 + prog * 0.42);
 
-        ctx.strokeStyle = `rgba(255, 140, 0, ${alpha.toFixed(3)})`;
-        ctx.lineWidth = 2.0;
+        ctx.strokeStyle = `rgba(255, 152, 24, ${alpha.toFixed(3)})`;
+        ctx.lineWidth = 2.6;
         ctx.beginPath();
-        ctx.moveTo(p.x - wSpan, p.y + 6);
-        ctx.lineTo(p.x, p.y - 5);
-        ctx.lineTo(p.x + wSpan, p.y + 6);
+        ctx.moveTo(p.x - wSpan, p.y + 7);
+        ctx.lineTo(p.x, p.y - 6);
+        ctx.lineTo(p.x + wSpan, p.y + 7);
         ctx.stroke();
       }
 
@@ -356,9 +356,9 @@ export class WorldRenderer {
       ctx.closePath();
       ctx.stroke();
 
-      ctx.font = 'bold 10px "JetBrains Mono", monospace';
+      ctx.font = 'bold 13px "JetBrains Mono", monospace';
       ctx.fillStyle = COLORS.GREEN_PRIMARY;
-      ctx.fillText(`${lander.spotlightDist.toFixed(0)}M`, hp.x + 9, hp.y - 4);
+      ctx.fillText(`${lander.spotlightDist.toFixed(0)}M`, hp.x + 10, hp.y - 4);
     }
 
     ctx.restore();
@@ -731,19 +731,19 @@ export class WorldRenderer {
         ctx.stroke();
       }
 
-      ctx.font = 'bold 12px "Share Tech Mono", monospace';
+      ctx.font = 'bold 15px "Share Tech Mono", monospace';
       ctx.textAlign = 'center';
       ctx.fillStyle = padColor;
       const badge = isDepot ? `[${pad.label} // +FUEL]` : `[${pad.label} // ${pad.multiplier}X]`;
-      ctx.fillText(badge, midX, pL.y + deckH + 16);
+      ctx.fillText(badge, midX, pL.y + deckH + 19);
 
       if (lander.groundedPad?.id === pad.id && isDepot) {
-        ctx.font = 'bold 11px "JetBrains Mono", monospace';
+        ctx.font = 'bold 14px "JetBrains Mono", monospace';
         ctx.fillStyle = COLORS.GREEN_BRIGHT;
         const statusTxt = lander.refuelingActive
           ? '>> PUMPING PROPELLANT // W TO LIFTOFF <<'
           : '>> TANKS FULL // PRESS W TO LIFTOFF <<';
-        ctx.fillText(statusTxt, midX, pL.y - 46);
+        ctx.fillText(statusTxt, midX, pL.y - 48);
       }
     }
 

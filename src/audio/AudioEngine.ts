@@ -23,10 +23,23 @@ export class AudioEngine {
   // Dedicated warm dampened ASMR keyboard bus (rolls off harsh highs, boosts 210Hz thock body)
   private asmrKeyBus: GainNode | null = null;
 
-  // Continuous DSP loop nodes
+  // Continuous DSP loop nodes (Dual-Layer Muted Flame Rumble + RCS + Space Ambience + Wind)
   private mainThrusterSource: AudioBufferSourceNode | null = null;
+  private synthFlameRumbleSource: AudioBufferSourceNode | null = null;
   private mainThrusterFilter: BiquadFilterNode | null = null;
+  private mainThrusterPostLp: BiquadFilterNode | null = null;
   private mainThrusterGain: GainNode | null = null;
+
+  // Smoothed per-frame DSP state (prevents Web Audio setTargetAtTime automation queue lockup)
+  private curMainFlameGain = 0;
+  private curMainFlameCutoff = 340;
+  private curMainFlameRate = 0.86;
+  private curRcsGain = 0;
+  private curRcsPan = 0;
+  private curWindGain = 0;
+  private curWindFreq = 450;
+  private curEerieGain = 0.11;
+  private curSpaceGain = 0.15;
 
   private rcsThrusterSource: AudioBufferSourceNode | null = null;
   private rcsPanner: StereoPannerNode | null = null;
@@ -46,8 +59,11 @@ export class AudioEngine {
   private decodedRealAssets = new Set<string>();
   private bufferOnsets = new Map<string, number>();
   private rawPrefetched = new Map<string, { data: ArrayBuffer; category: 'loop' | 'sfx' | 'voice' }>();
+  private bootStartPromise: Promise<void> | null = null;
   private prefetchPromise: Promise<void> | null = null;
   private decodePromise: Promise<void> | null = null;
+  private bootStartupSource: AudioBufferSourceNode | null = null;
+  private bootStartupGain: GainNode | null = null;
 
   private muted = false;
   private unlocked = false;
@@ -58,7 +74,41 @@ export class AudioEngine {
   private keyAltToggle = false;
 
   constructor() {
+    this.bootStartPromise = this.prefetchBootStartAudio();
     this.prefetchPromise = this.prefetchManifestAndMp3s();
+  }
+
+  private async prefetchBootStartAudio(): Promise<void> {
+    try {
+      const base = import.meta.env.BASE_URL || './';
+      const prefix = base === '/' ? '.' : base.replace(/\/$/, '');
+      const res = await fetch(`${prefix}/audio/homeade_computer_start.m4a`);
+      if (!res.ok) return;
+      const arr = await res.arrayBuffer();
+      if (arr.byteLength > 512) {
+        this.rawPrefetched.set('homeade_computer_start', { data: arr, category: 'sfx' });
+      }
+    } catch {
+      // Fallback handled gracefully if offline
+    }
+  }
+
+  private async ensureBootStartDecoded(): Promise<void> {
+    if (!this.ctx || this.decodedRealAssets.has('homeade_computer_start')) return;
+    if (this.bootStartPromise) {
+      await this.bootStartPromise;
+    }
+    const item = this.rawPrefetched.get('homeade_computer_start');
+    if (!item || !this.ctx || this.decodedRealAssets.has('homeade_computer_start')) return;
+    try {
+      const copy = item.data.slice(0);
+      const decoded = await this.ctx.decodeAudioData(copy);
+      this.decodedRealAssets.add('homeade_computer_start');
+      this.buffers.set('homeade_computer_start', decoded);
+      this.bufferOnsets.set('homeade_computer_start', 0);
+    } catch {
+      // Fallback if browser codec fails
+    }
   }
 
   private async prefetchManifestAndMp3s(): Promise<void> {
@@ -71,7 +121,9 @@ export class AudioEngine {
       const data = (await res.json()) as Partial<AudioManifestData>;
       if (!data || typeof data.assets !== 'object' || data.assets === null) return;
 
-      const entries = Object.entries(data.assets).filter(([id]) => id !== 'ambient_crt_buzz');
+      const entries = Object.entries(data.assets).filter(
+        ([id]) => id !== 'ambient_crt_buzz' && id !== 'homeade_computer_start'
+      );
       await Promise.all(
         entries.map(async ([id, meta]) => {
           try {
@@ -209,6 +261,10 @@ export class AudioEngine {
     }
     this.unlocked = this.ctx.state === 'running';
 
+    // Immediately decode homeade_computer_start.m4a so CRT tube ignition plays with zero lag,
+    // while decoding the remaining 35 assets in the background!
+    await this.ensureBootStartDecoded();
+
     if (!this.decodePromise) {
       this.decodePromise = (async () => {
         if (this.prefetchPromise) {
@@ -217,7 +273,6 @@ export class AudioEngine {
         await this.decodePrefetchedBuffers();
       })();
     }
-    await this.decodePromise;
   }
 
   private setupGraph(): void {
@@ -302,6 +357,51 @@ export class AudioEngine {
     const ctx = this.ctx!;
     const sr = ctx.sampleRate;
 
+    // Dedicated always-active 6.0s turbulent muted combustion rumble buffer (translates on both subwoofers & phone speakers)
+    if (!this.buffers.has('muted_flame_rumble_core')) {
+      const durSec = 6;
+      const len = sr * durSec;
+      const buf = ctx.createBuffer(1, len, sr);
+      const data = buf.getChannelData(0);
+      let b0 = 0;
+      let b1 = 0;
+      let b2 = 0;
+      let brown = 0;
+      let lp1 = 0;
+      let lp2 = 0;
+      const alphaLp = 1 - Math.exp((-2 * Math.PI * 360) / sr);
+      for (let i = 0; i < len; i++) {
+        const white = Math.random() * 2 - 1;
+        b0 = 0.99765 * b0 + white * 0.099046;
+        b1 = 0.963 * b1 + white * 0.2965164;
+        b2 = 0.57 * b2 + white * 1.0526913;
+        const pink = (b0 + b1 + b2 + white * 0.1848) * 0.16;
+        brown = (brown + 0.042 * white) / 1.042;
+
+        // Prime-harmonic loop-periodic combustion chamber flutter (13Hz, 21Hz, 34Hz, 53Hz)
+        const u = i / len;
+        const tau = Math.PI * 2 * u;
+        const chamberFlutter =
+          0.78 +
+          0.11 * Math.sin(tau * (13 * durSec)) +
+          0.09 * Math.sin(tau * (21 * durSec) + 0.7) +
+          0.07 * Math.cos(tau * (34 * durSec) + 1.9) +
+          0.05 * Math.sin(tau * (53 * durSec) + 2.8);
+
+        // Warm low-frequency hull-coupled combustion resonance (72Hz + 138Hz)
+        const hullFlameTone =
+          0.09 * Math.sin(tau * (72 * durSec) + Math.sin(tau * (7 * durSec)) * 0.8) +
+          0.06 * Math.sin(tau * (138 * durSec) + Math.cos(tau * (11 * durSec)) * 0.6);
+
+        const rawPlume = (brown * 3.1 + pink * 1.15) * chamberFlutter + hullFlameTone;
+        const saturated = Math.tanh(rawPlume * 1.55);
+        lp1 += alphaLp * (saturated - lp1);
+        lp2 += alphaLp * (lp1 - lp2);
+        data[i] = lp2 * 0.92;
+      }
+      this.buffers.set('muted_flame_rumble_core', this.createSeamlessOverlapLoop(buf, 0.55));
+    }
+
     if (!this.buffers.has('thruster_main_loop')) {
       const len = sr * 4;
       const buf = ctx.createBuffer(1, len, sr);
@@ -381,29 +481,51 @@ export class AudioEngine {
     const ctx = this.ctx!;
     if (!this.masterGain) return;
 
+    // Dual-Stage Muted Flame Rumble Bus (warm 80–480Hz combustion body, steep roll-off above ~620Hz = zero hiss!)
     this.mainThrusterFilter = ctx.createBiquadFilter();
     this.mainThrusterFilter.type = 'lowpass';
-    this.mainThrusterFilter.frequency.value = 160;
-    this.mainThrusterFilter.Q.value = 0.52; // Non-resonant butter-smooth rolloff (zero whistle!)
+    this.mainThrusterFilter.frequency.value = 340;
+    this.mainThrusterFilter.Q.value = 0.62;
 
     const subBassShelf = ctx.createBiquadFilter();
     subBassShelf.type = 'lowshelf';
-    subBassShelf.frequency.value = 125;
+    subBassShelf.frequency.value = 135;
     subBassShelf.gain.value = 5.5;
 
-    const harshNotch = ctx.createBiquadFilter();
-    harshNotch.type = 'peaking';
-    harshNotch.frequency.value = 2300;
-    harshNotch.Q.value = 1.2;
-    harshNotch.gain.value = -7.5;
+    const combustionBody = ctx.createBiquadFilter();
+    combustionBody.type = 'peaking';
+    combustionBody.frequency.value = 195;
+    combustionBody.Q.value = 0.85;
+    combustionBody.gain.value = 5.0;
+
+    this.mainThrusterPostLp = ctx.createBiquadFilter();
+    this.mainThrusterPostLp.type = 'lowpass';
+    this.mainThrusterPostLp.frequency.value = 560;
+    this.mainThrusterPostLp.Q.value = 0.54;
 
     this.mainThrusterGain = ctx.createGain();
     this.mainThrusterGain.gain.value = 0;
 
     this.mainThrusterFilter.connect(subBassShelf);
-    subBassShelf.connect(harshNotch);
-    harshNotch.connect(this.mainThrusterGain);
+    subBassShelf.connect(combustionBody);
+    combustionBody.connect(this.mainThrusterPostLp);
+    this.mainThrusterPostLp.connect(this.mainThrusterGain);
     this.mainThrusterGain.connect(this.masterGain);
+
+    // Start dedicated turbulent muted combustion core + sample texture layer
+    const coreBuf = this.buffers.get('muted_flame_rumble_core');
+    if (coreBuf) {
+      const coreSrc = ctx.createBufferSource();
+      coreSrc.buffer = coreBuf;
+      coreSrc.loop = true;
+      coreSrc.playbackRate.value = 0.92;
+      const coreMix = ctx.createGain();
+      coreMix.gain.value = 0.88;
+      coreSrc.connect(coreMix);
+      coreMix.connect(this.mainThrusterFilter);
+      coreSrc.start();
+      this.synthFlameRumbleSource = coreSrc;
+    }
     this.restartLoopSource('thruster_main_loop');
 
     this.rcsFilter = ctx.createBiquadFilter();
@@ -625,8 +747,11 @@ export class AudioEngine {
         /* ignore */
       }
       this.mainThrusterSource = makeSource();
-      this.mainThrusterSource.playbackRate.value = 0.85;
-      this.mainThrusterSource.connect(this.mainThrusterFilter);
+      this.mainThrusterSource.playbackRate.value = 0.84;
+      const sampleMix = ctx.createGain();
+      sampleMix.gain.value = 0.62;
+      this.mainThrusterSource.connect(sampleMix);
+      sampleMix.connect(this.mainThrusterFilter);
       this.mainThrusterSource.start();
     } else if (id === 'thruster_rcs_loop' && this.rcsFilter) {
       try {
@@ -659,50 +784,83 @@ export class AudioEngine {
     }
   }
 
+  private setSmoothParam(param: AudioParam | undefined | null, value: number): void {
+    if (!param || !this.ctx) return;
+    if (Math.abs(param.value - value) < 0.0004) return;
+    param.cancelScheduledValues(this.ctx.currentTime);
+    param.value = value;
+  }
+
   public updateFlightDsp(
     throttle: number,
     rcsDirection: number,
     rcsIntensity: number,
     windSpeedMps: number,
     flightActive: boolean,
-    caveDarkness = 0
+    caveDarkness = 0,
+    dt = 1 / 60
   ): void {
     if (!this.ctx || !this.unlocked) return;
-    const now = this.ctx.currentTime;
+
+    const clampedDt = Math.max(0.001, Math.min(0.1, dt));
+    const fastK = 1 - Math.exp(-clampedDt * 20);
+    const medK = 1 - Math.exp(-clampedDt * 9);
+    const slowK = 1 - Math.exp(-clampedDt * 2.5);
 
     // Tastefully swell deep-space & eerie hull resonance inside dark caverns
     const targetEerie = 0.09 + caveDarkness * 0.09;
-    this.eerieAmbienceGain?.gain.setTargetAtTime(targetEerie, now, 0.45);
-    this.deepSpaceBusGain?.gain.setTargetAtTime(0.15 + caveDarkness * 0.06, now, 0.45);
+    const targetSpace = 0.15 + caveDarkness * 0.06;
+    this.curEerieGain += (targetEerie - this.curEerieGain) * slowK;
+    this.curSpaceGain += (targetSpace - this.curSpaceGain) * slowK;
+    this.setSmoothParam(this.eerieAmbienceGain?.gain, this.curEerieGain);
+    this.setSmoothParam(this.deepSpaceBusGain?.gain, this.curSpaceGain);
 
     if (!flightActive) {
-      this.mainThrusterGain?.gain.setTargetAtTime(0, now, 0.06);
-      this.rcsGain?.gain.setTargetAtTime(0, now, 0.04);
-      this.windGain?.gain.setTargetAtTime(0, now, 0.12);
+      this.curMainFlameGain += (0 - this.curMainFlameGain) * fastK;
+      this.curRcsGain += (0 - this.curRcsGain) * fastK;
+      this.curWindGain += (0 - this.curWindGain) * medK;
+      this.setSmoothParam(this.mainThrusterGain?.gain, this.curMainFlameGain < 0.002 ? 0 : this.curMainFlameGain);
+      this.setSmoothParam(this.rcsGain?.gain, this.curRcsGain < 0.002 ? 0 : this.curRcsGain);
+      this.setSmoothParam(this.windGain?.gain, this.curWindGain < 0.002 ? 0 : this.curWindGain);
       return;
     }
 
-    // Deep SpaceX Starship Raptor flame curve: low baritone pitch (0.72x..0.96x) & warm 160Hz..1350Hz roar
+    // Sustained Muted Flame Rumble: warm muffled combustion roar (280Hz..650Hz) with zero harsh hiss
     const clampedNorm = Math.max(0, Math.min(1, throttle));
     const overdriveExtra = Math.max(0, throttle - 1);
-    const targetRate = 0.72 + clampedNorm * 0.24 + overdriveExtra * 0.08;
-    const targetCutoff = 160 + Math.pow(clampedNorm, 1.1) * 1190 + overdriveExtra * 340;
-    const targetMainGain = throttle > 0.005 ? Math.min(0.88, 0.18 + throttle * 0.54) : 0;
+    const targetRate = 0.78 + clampedNorm * 0.22 + overdriveExtra * 0.10;
+    const targetCutoff = 280 + Math.pow(clampedNorm, 0.9) * 340 + overdriveExtra * 190;
+    const targetPostCutoff = 480 + clampedNorm * 210 + overdriveExtra * 160;
+    const targetMainGain =
+      throttle > 0.01 ? Math.min(0.92, 0.36 + clampedNorm * 0.44 + overdriveExtra * 0.14) : 0;
 
-    this.mainThrusterSource?.playbackRate.setTargetAtTime(targetRate, now, 0.05);
-    this.mainThrusterFilter?.frequency.setTargetAtTime(targetCutoff, now, 0.05);
-    this.mainThrusterGain?.gain.setTargetAtTime(targetMainGain, now, 0.04);
+    this.curMainFlameRate += (targetRate - this.curMainFlameRate) * fastK;
+    this.curMainFlameCutoff += (targetCutoff - this.curMainFlameCutoff) * fastK;
+    this.curMainFlameGain += (targetMainGain - this.curMainFlameGain) * fastK;
+
+    this.setSmoothParam(this.mainThrusterSource?.playbackRate, this.curMainFlameRate);
+    this.setSmoothParam(this.synthFlameRumbleSource?.playbackRate, this.curMainFlameRate * 0.96);
+    this.setSmoothParam(this.mainThrusterFilter?.frequency, this.curMainFlameCutoff);
+    this.setSmoothParam(this.mainThrusterPostLp?.frequency, targetPostCutoff);
+    this.setSmoothParam(
+      this.mainThrusterGain?.gain,
+      this.curMainFlameGain < 0.002 ? 0 : this.curMainFlameGain
+    );
 
     const targetPan = Math.max(-0.6, Math.min(0.6, rcsDirection * 0.52));
-    const targetRcsGain = rcsIntensity > 0.01 ? Math.min(0.4, rcsIntensity * 0.32) : 0;
-    this.rcsPanner?.pan.setTargetAtTime(targetPan, now, 0.03);
-    this.rcsGain?.gain.setTargetAtTime(targetRcsGain, now, 0.025);
+    const targetRcsGain = rcsIntensity > 0.01 ? Math.min(0.38, rcsIntensity * 0.30) : 0;
+    this.curRcsPan += (targetPan - this.curRcsPan) * fastK;
+    this.curRcsGain += (targetRcsGain - this.curRcsGain) * fastK;
+    this.setSmoothParam(this.rcsPanner?.pan, this.curRcsPan);
+    this.setSmoothParam(this.rcsGain?.gain, this.curRcsGain < 0.002 ? 0 : this.curRcsGain);
 
     const windNorm = Math.min(1, windSpeedMps / 14);
-    const targetWindGain = windNorm * 0.38;
-    const targetWindFreq = 450 + windNorm * 1800;
-    this.windGain?.gain.setTargetAtTime(targetWindGain, now, 0.12);
-    this.windFilter?.frequency.setTargetAtTime(targetWindFreq, now, 0.12);
+    const targetWindGain = windNorm * 0.34;
+    const targetWindFreq = 420 + windNorm * 1350;
+    this.curWindGain += (targetWindGain - this.curWindGain) * medK;
+    this.curWindFreq += (targetWindFreq - this.curWindFreq) * medK;
+    this.setSmoothParam(this.windGain?.gain, this.curWindGain < 0.002 ? 0 : this.curWindGain);
+    this.setSmoothParam(this.windFilter?.frequency, this.curWindFreq);
   }
 
   public setMuted(muted: boolean): void {
@@ -736,21 +894,67 @@ export class AudioEngine {
   }
 
   /**
-   * Plays the full 1979 ALIEN ("Mother" Bridge Awakening Scene - Mn7A1vfs8m0)
-   * initialization audio choreography: heavy relay switch, CRT HV flyback,
-   * ElevenLabs mainframe chirp/relay sequence, tape-drive spin-up, and rhythmic
-   * 1979 FSK analog mainframe bleep cascade.
+   * Plays `homeade_computer_start.m4a` simultaneously with the distorted 1979 CRT
+   * tube turn-on flash (completely replacing the old `screen_power_on.mp3`).
    */
   public playAlienBootAwakening(): void {
-    if (!this.ctx || !this.masterGain || this.muted) return;
+    if (!this.ctx || !this.masterGain) return;
     const now = this.ctx.currentTime;
 
-    this.playSfx('screen_power_on', { volume: 0.9, pitch: 0.88 });
-    this.playLowComputerBuffer('nostromo_boot_sequence', 0.72, 0.68);
-    this.playLowComputerBuffer('tape_drive_servo', 0.65, 0.82);
+    const startBuf = this.buffers.get('homeade_computer_start');
+    if (startBuf) {
+      try {
+        this.bootStartupSource?.stop();
+      } catch {
+        /* ignore */
+      }
+      const src = this.ctx.createBufferSource();
+      src.buffer = startBuf;
+      src.playbackRate.value = 1.0;
 
-    // Low-register baritone 1979 mainframe telemetry cascade
-    this.synth1979MainframeCascade(now + 0.24, 9, 0.36);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.96, now);
+      src.connect(gain);
+      gain.connect(this.masterGain);
+      src.start(now, 0);
+
+      this.bootStartupSource = src;
+      this.bootStartupGain = gain;
+      src.onended = () => {
+        if (this.bootStartupSource === src) {
+          this.bootStartupSource = null;
+          this.bootStartupGain = null;
+        }
+      };
+      return;
+    }
+
+    if (!this.muted) {
+      this.synthScreenPowerOn(now, 0.75);
+    }
+  }
+
+  /**
+   * Smoothly fades out the startup computer audio once active drop-shuttle flight engages.
+   */
+  public fadeOutBootStartupAudio(fadeSec = 1.1): void {
+    if (!this.ctx || !this.bootStartupSource || !this.bootStartupGain) return;
+    const now = this.ctx.currentTime;
+    const src = this.bootStartupSource;
+    const g = this.bootStartupGain;
+    this.bootStartupSource = null;
+    this.bootStartupGain = null;
+
+    g.gain.cancelScheduledValues(now);
+    g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + fadeSec);
+    window.setTimeout(() => {
+      try {
+        src.stop();
+      } catch {
+        /* ignore */
+      }
+    }, Math.ceil((fadeSec + 0.1) * 1000));
   }
 
   /**
@@ -1223,7 +1427,6 @@ export class AudioEngine {
       const startOffset =
         lookupKey === 'button_latch_lock' ||
         lookupKey === 'keypress_return' ||
-        lookupKey === 'screen_power_on' ||
         lookupKey === 'thruster_ignite' ||
         lookupKey === 'landing_hard_thud' ||
         lookupKey === 'landing_soft_mech'
@@ -1234,7 +1437,7 @@ export class AudioEngine {
     }
 
     switch (id) {
-      case 'screen_power_on':
+      case 'homeade_computer_start':
         this.synthScreenPowerOn(now, volume);
         break;
       case 'nostromo_boot_sequence':

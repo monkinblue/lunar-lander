@@ -210,7 +210,13 @@ export class GlobalLeaderboardService {
     sector: number;
     mode: LeaderboardMode;
     accuracy: number;
-  }): Promise<{ ok: boolean; rank: number; mode: LeaderboardMode; offlineFallback: boolean }> {
+  }): Promise<{
+    ok: boolean;
+    rank: number;
+    mode: LeaderboardMode;
+    offlineFallback: boolean;
+    docId?: string;
+  }> {
     const callsign = this.saveCallsign(params.callsign);
     const score = Math.max(1, Math.min(1000000, Math.round(params.score)));
     const sector = Math.max(1, Math.min(99, Math.round(params.sector)));
@@ -236,7 +242,7 @@ export class GlobalLeaderboardService {
 
     try {
       // EXACT 6-key document matching published Firestore Security Rules (ZERO extra keys!)
-      await addDoc(collection(this.db, 'scores'), {
+      const docRef = await addDoc(collection(this.db, 'scores'), {
         callsign,
         score,
         sector,
@@ -251,7 +257,7 @@ export class GlobalLeaderboardService {
         if (item.score > score) higherCount++;
       }
       const rank = higherCount + 1;
-      return { ok: true, rank, mode, offlineFallback: false };
+      return { ok: true, rank, mode, offlineFallback: false, docId: docRef.id };
     } catch (err) {
       console.error('[MU-TH-UR UPLINK] Score transmission rejected or failed:', err);
       const localList = this.localFallback.getEntriesByMode(mode);

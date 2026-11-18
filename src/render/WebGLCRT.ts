@@ -68,6 +68,7 @@ uniform float uCrtIntensity;   // 0.0 .. 1.0 (starts at 0.50 = 50%)
 uniform float uInterference;   // 0.0 .. 1.0
 uniform float uGlitch;         // 0.0 .. 1.0
 uniform float uOverdrive;      // 0.0 .. 1.0
+uniform float uTubeTurnOn;     // 1.0 at cold ignition -> 0.0 when warmed up
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -93,9 +94,25 @@ float roundedTubeMask(vec2 uv, float cornerRadius) {
 
 void main() {
   float dial = clamp(uCrtIntensity, 0.0, 1.0);
-  // At 0% intensity dial, glass curvature is 0% (flat); scales smoothly up with dial
-  float curveAmt = dial * 0.95;
+  float turnOn = clamp(uTubeTurnOn, 0.0, 1.0);
+  // At 0% intensity dial, glass curvature is 0% (flat); scales smoothly up with dial (plus transient yoke swell on ignition)
+  float curveAmt = clamp(dial * 0.95 + turnOn * turnOn * 0.85, 0.0, 1.45);
   vec2 uv = warpUV(vUv, curveAmt);
+
+  // Cold-cathode 1979 magnetic deflection yoke distortion when tube first snaps on!
+  if (turnOn > 0.001) {
+    vec2 tc = uv * 2.0 - 1.0;
+    float sCurveX = sin(tc.y * 7.5 + uTime * 46.0) * 0.19 * turnOn * turnOn
+                  + cos(tc.y * 19.0 - uTime * 68.0) * 0.055 * turnOn;
+    float yokeBowY = sin(tc.x * 4.2 + uTime * 34.0) * 0.09 * turnOn * turnOn;
+    // Brief vertical deflection snap-open with magnetic overshoot ring
+    float openProg = 1.0 - turnOn;
+    float vStretch = mix(0.05, 1.0, smoothstep(0.0, 0.34, openProg))
+                   + sin(openProg * 22.0) * exp(-openProg * 4.5) * 0.14;
+    tc.x = (tc.x + sCurveX) / max(0.32, 1.0 - 0.35 * turnOn * turnOn);
+    tc.y = (tc.y + yokeBowY) / max(0.045, vStretch);
+    uv = tc * 0.5 + 0.5;
+  }
 
   float cornerR = dial * 0.058;
   float mask = cornerR > 0.001 ? roundedTubeMask(uv, cornerR) : 1.0;
@@ -104,6 +121,7 @@ void main() {
     float rim = smoothstep(0.995, 0.92, max(edgeDist.x, edgeDist.y));
     float grain = (hash12(gl_FragCoord.xy * 0.5) - 0.5) * 0.014;
     vec3 bezelCol = mix(vec3(0.018, 0.024, 0.020), vec3(0.050, 0.064, 0.054), rim * 0.55) + grain;
+    bezelCol = mix(bezelCol, vec3(0.004, 0.001, 0.001), clamp(turnOn * 3.0, 0.0, 1.0));
     gl_FragColor = vec4(bezelCol, 1.0);
     return;
   }
@@ -131,7 +149,9 @@ void main() {
   // SUBTLE HORIZONTAL RGB BEAM MISCONVERGENCE (Warm-Amber / Cool-Violet Fringe)
   // Stronger toward the curved CRT edges, matching the 1979 reference monitor!
   // =========================================================================
-  float misconvPx = (0.95 + cornerR2 * 2.35) * (0.45 + 0.65 * dial) * uDpr + totalDisturb * 2.8 * uDpr;
+  float misconvPx = (0.95 + cornerR2 * 2.35) * (0.45 + 0.65 * dial) * uDpr
+                  + totalDisturb * 2.8 * uDpr
+                  + turnOn * turnOn * 20.0 * uDpr;
   vec2 misconvVec = vec2(misconvPx * texel.x, tubeCentered.y * 0.30 * misconvPx * texel.y);
 
   vec3 sampLeft  = texture2D(uSourceTex, clamp(sampleUv - misconvVec, 0.001, 0.999)).rgb;
@@ -183,6 +203,16 @@ void main() {
   // Restored Deep CRT Contrast Floor
   vec3 cathodeFloor = vec3(0.012, 0.025, 0.016) * (1.0 - cornerR2 * 0.38);
   vec3 col = cathodeFloor + beamWithPersistence * 0.96 + bloomCol * bloomTint;
+
+  // High-voltage CRT tube ignition flash: distorted anamorphic discharge wave & phosphor surge
+  if (turnOn > 0.001) {
+    float openProg = 1.0 - turnOn;
+    float arcLine = exp(-abs(tubeCentered.y + sin(tubeCentered.x * 6.5 + uTime * 42.0) * 0.12) * (18.0 - 13.0 * turnOn));
+    float screenSurge = sin(clamp(openProg / 0.55, 0.0, 1.0) * 3.14159265) * turnOn;
+    float centerHot = exp(-dot(tubeCentered * vec2(0.65, 1.35), tubeCentered * vec2(0.65, 1.35)) * 2.4);
+    vec3 flashTint = mix(vec3(1.00, 0.26, 0.16), vec3(1.15, 0.94, 0.86), clamp(arcLine * 0.7 + centerHot * 0.5, 0.0, 1.0));
+    col += flashTint * (arcLine * turnOn * 1.35 + screenSurge * (0.55 + 0.65 * centerHot));
+  }
 
   // =========================================================================
   // PROMINENT 1970s TRINITRON VERTICAL APERTURE GRILLE + INTERLOCKED SCANLINES
@@ -276,6 +306,7 @@ export class WebGLCRT {
   private uCompInterference: WebGLUniformLocation | null = null;
   private uCompGlitch: WebGLUniformLocation | null = null;
   private uCompOverdrive: WebGLUniformLocation | null = null;
+  private uCompTubeTurnOn: WebGLUniformLocation | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -335,6 +366,7 @@ export class WebGLCRT {
     this.uCompInterference = gl.getUniformLocation(compProg, 'uInterference');
     this.uCompGlitch = gl.getUniformLocation(compProg, 'uGlitch');
     this.uCompOverdrive = gl.getUniformLocation(compProg, 'uOverdrive');
+    this.uCompTubeTurnOn = gl.getUniformLocation(compProg, 'uTubeTurnOn');
   }
 
   private createLinearTexture(gl: WebGLRenderingContext): WebGLTexture | null {
@@ -466,7 +498,8 @@ export class WebGLCRT {
     crtIntensity: number,
     interference: number,
     glitch: number,
-    overdrive: number
+    overdrive: number,
+    tubeTurnOn = 0
   ): void {
     const gl = this.gl;
     if (!gl || !this.accumProgram || !this.compositeProgram || !this.sourceTexture) {
@@ -572,6 +605,7 @@ export class WebGLCRT {
     gl.uniform1f(this.uCompInterference, interference);
     gl.uniform1f(this.uCompGlitch, glitch);
     gl.uniform1f(this.uCompOverdrive, overdrive);
+    gl.uniform1f(this.uCompTubeTurnOn, tubeTurnOn);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
