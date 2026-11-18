@@ -1346,7 +1346,7 @@ export class GameController {
         const sinkRateWarn =
           this.lander.agl < 17 && this.lander.vel.y < -3.75 && this.lander.throttle < 0.75;
         const lateralDriftWarn =
-          this.lander.agl < 15 && Math.abs(this.lander.vel.x) > 2.65;
+          this.lander.agl < 15 && Math.abs(this.lander.vel.x) > 3.15;
         const absPitchDeg = Math.abs((this.lander.angle * 180) / Math.PI);
         const bankAngleWarn =
           (this.lander.agl < 34 && absPitchDeg > 33.0) || absPitchDeg > 58.0;

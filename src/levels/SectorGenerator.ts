@@ -428,10 +428,10 @@ export class SectorGenerator {
         minY: 0,
         maxY: 85,
         label: 'BOUNDARY GUST ZONE',
-        baseVx: 6.8,
-        gustAmp: 3.6,
+        baseVx: 4.42,
+        gustAmp: 2.34,
         gustFreq: 0.52,
-        turbulenceVy: 0.45,
+        turbulenceVy: 0.29,
       },
     ];
 
@@ -599,10 +599,10 @@ export class SectorGenerator {
         minY: 0,
         maxY: 120,
         label: 'ION SURFACE DRIFT',
-        baseVx: 7.4,
-        gustAmp: 3.4,
+        baseVx: 4.81,
+        gustAmp: 2.21,
         gustFreq: 0.48,
-        turbulenceVy: 0.45,
+        turbulenceVy: 0.29,
       },
     ];
 
@@ -723,10 +723,10 @@ export class SectorGenerator {
         minY: 0,
         maxY: 130,
         label: 'EXHAUST BACKDRAFT',
-        baseVx: -9.8,
-        gustAmp: 4.5,
+        baseVx: -6.37,
+        gustAmp: 2.93,
         gustFreq: 0.65,
-        turbulenceVy: 0.8,
+        turbulenceVy: 0.52,
       },
     ];
 
@@ -845,10 +845,10 @@ export class SectorGenerator {
           minY: 0,
           maxY: 130,
           label: 'BASIN COUNTERFLOW',
-          baseVx: -dir * (4.5 + rng() * 5.0),
-          gustAmp: 2.2 + rng() * 2,
+          baseVx: -dir * (4.5 + rng() * 5.0) * 0.65,
+          gustAmp: (2.2 + rng() * 2) * 0.65,
           gustFreq: 0.6,
-          turbulenceVy: 0.45,
+          turbulenceVy: 0.29,
         }
       );
     }

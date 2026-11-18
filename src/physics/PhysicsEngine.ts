@@ -656,7 +656,7 @@ export class PhysicsEngine {
       const slopeR = Math.abs(this.sampleTerrainSlopeDeg(sector.terrain, restFootR.x));
       if (
         impactVs > 1.55 ||
-        impactHs > 1.35 ||
+        impactHs > 1.85 ||
         impactDeg > 11 ||
         Math.max(slopeL, slopeR) > 16
       ) {

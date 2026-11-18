@@ -168,10 +168,10 @@ export class HudRenderer {
       });
     }
 
-    if (lander.agl < 28 && Math.abs(lander.vel.x) > 1.65) {
+    if (lander.agl < 28 && Math.abs(lander.vel.x) > 2.15) {
       alerts.push({
         text: 'LATERAL DRIFT',
-        critical: lander.agl < 15 && Math.abs(lander.vel.x) > 2.4,
+        critical: lander.agl < 15 && Math.abs(lander.vel.x) > 2.85,
       });
     }
 

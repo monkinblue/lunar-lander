@@ -71,12 +71,12 @@ export const PHYSICS = {
   // Approach & Landing Thresholds
   APPROACH_PROXIMITY_M: 90,
   SAFE_VS_MAX: 2.2,
-  SAFE_HS_MAX: 1.2,
+  SAFE_HS_MAX: 1.9,
   SAFE_ANGLE_DEG: 7.0,
   KISS_VS_MAX: 0.8,
-  KISS_HS_MAX: 0.4,
+  KISS_HS_MAX: 0.7,
   SURVIVAL_VS_MAX: 3.8,
-  SURVIVAL_HS_MAX: 2.1,
+  SURVIVAL_HS_MAX: 3.0,
   SURVIVAL_ANGLE_DEG: 13.5,
 
   // Refuel Depot Rate
