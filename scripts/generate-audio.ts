@@ -87,12 +87,44 @@ const SOUND_ASSETS: SoundGenAsset[] = [
     promptInfluence: 0.5,
   },
   {
+    filename: 'nostromo_boot_sequence.mp3',
+    prompt:
+      '1979 sci-fi spacecraft mainframe computer awakening sequence, vintage analog synthesizer data chirps, stuttering electronic telemetry bleeps, relay switches clattering, magnetic tape drive whir, eerie cassette futurism.',
+    loop: false,
+    durationSeconds: 5.5,
+    promptInfluence: 0.65,
+  },
+  {
+    filename: 'computer_telemetry_chirp.mp3',
+    prompt:
+      '1979 retro sci-fi computer terminal thinking noises, rapid muted analog synth telemetry bleeps and soft electronic data handshake chirps.',
+    loop: false,
+    durationSeconds: 2.2,
+    promptInfluence: 0.65,
+  },
+  {
+    filename: 'tape_drive_servo.mp3',
+    prompt:
+      '1970s mainframe magnetic tape reel servo spin-up whir, muted solenoid relay latch, and subtle analog computer hum.',
+    loop: false,
+    durationSeconds: 2.6,
+    promptInfluence: 0.6,
+  },
+  {
     filename: 'ui_keyclick.mp3',
     prompt:
-      'Heavy spring-loaded mechanical 1970s computer terminal keycap clack.',
+      'Single close-mic ASMR dull muted deep thocky mechanical keyboard keycap press, dampened thick plastic thud, soft warm low-end, no sharp click or metallic ring.',
     loop: false,
-    durationSeconds: 0.9,
-    promptInfluence: 0.5,
+    durationSeconds: 0.8,
+    promptInfluence: 0.72,
+  },
+  {
+    filename: 'ui_keyclick_alt.mp3',
+    prompt:
+      'Single soft muted deep ASMR thick plastic keycap thock, dampened vintage terminal key bottom-out, warm dull thud, zero harsh treble.',
+    loop: false,
+    durationSeconds: 0.8,
+    promptInfluence: 0.72,
   },
   {
     filename: 'keypress_return.mp3',

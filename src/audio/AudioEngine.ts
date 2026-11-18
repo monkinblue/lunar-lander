@@ -20,6 +20,8 @@ export class AudioEngine {
   private analyserData: Uint8Array<ArrayBuffer> | null = null;
 
   private intercomInput: GainNode | null = null;
+  // Dedicated warm dampened ASMR keyboard bus (rolls off harsh highs, boosts 210Hz thock body)
+  private asmrKeyBus: GainNode | null = null;
 
   // Continuous DSP loop nodes
   private mainThrusterSource: AudioBufferSourceNode | null = null;
@@ -39,6 +41,7 @@ export class AudioEngine {
   private windGain: GainNode | null = null;
 
   private buffers = new Map<string, AudioBuffer>();
+  private bufferOnsets = new Map<string, number>();
   private rawPrefetched = new Map<string, { data: ArrayBuffer; category: 'loop' | 'sfx' | 'voice' }>();
   private prefetchPromise: Promise<void> | null = null;
   private decodePromise: Promise<void> | null = null;
@@ -49,15 +52,12 @@ export class AudioEngine {
   private lastVoiceTime = 0;
   private lastKlaxonTime = 0;
   private lastKeyclickTime = 0;
+  private keyAltToggle = false;
 
   constructor() {
     this.prefetchPromise = this.prefetchManifestAndMp3s();
   }
 
-  /**
-   * Eagerly fetches manifest.json and raw MP3 ArrayBuffers on page load so that
-   * as soon as the user interacts, AudioBuffers decode immediately without network lag.
-   */
   private async prefetchManifestAndMp3s(): Promise<void> {
     try {
       const base = import.meta.env.BASE_URL || './';
@@ -89,8 +89,28 @@ export class AudioEngine {
         await this.decodePrefetchedBuffers();
       }
     } catch {
-      // Silent fallback to procedural synthesis only if manifest fails
+      // Silent fallback to procedural synthesis if offline
     }
+  }
+
+  /**
+   * Finds exact transient onset timestamp inside an AudioBuffer so rapid ASMR
+   * scrolling text clacks have zero leading silence lag.
+   */
+  private detectTransientOnsetSec(buf: AudioBuffer): number {
+    const ch = buf.getChannelData(0);
+    let peak = 0;
+    for (let i = 0; i < ch.length; i++) {
+      const a = Math.abs(ch[i]);
+      if (a > peak) peak = a;
+    }
+    const thresh = Math.max(0.02, peak * 0.16);
+    for (let i = 0; i < ch.length; i++) {
+      if (Math.abs(ch[i]) >= thresh) {
+        return Math.max(0, i / buf.sampleRate - 0.003);
+      }
+    }
+    return 0;
   }
 
   private async decodePrefetchedBuffers(): Promise<void> {
@@ -104,10 +124,12 @@ export class AudioEngine {
     await Promise.all(
       pending.map(async ([id, item]) => {
         try {
-          // Slice copy so decodeAudioData detaching buffer never corrupts retries
           const copy = item.data.slice(0);
           const decoded = await ctx.decodeAudioData(copy);
           this.buffers.set(id, decoded);
+          if (item.category === 'sfx') {
+            this.bufferOnsets.set(id, this.detectTransientOnsetSec(decoded));
+          }
           if (item.category === 'loop') {
             this.restartLoopSource(id);
           }
@@ -116,6 +138,10 @@ export class AudioEngine {
         }
       })
     );
+  }
+
+  public isUnlocked(): boolean {
+    return this.unlocked;
   }
 
   public async unlock(): Promise<void> {
@@ -153,7 +179,7 @@ export class AudioEngine {
   private setupGraph(): void {
     const ctx = this.ctx!;
     this.masterGain = ctx.createGain();
-    this.masterGain.gain.value = this.muted ? 0 : 0.88;
+    this.masterGain.gain.value = this.muted ? 0 : 0.9;
 
     this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = 64;
@@ -162,7 +188,27 @@ export class AudioEngine {
     this.masterGain.connect(this.analyser);
     this.analyser.connect(ctx.destination);
 
-    // Authentic 1979 Nostromo Shipboard Intercom Chain (350Hz–3400Hz + soft-clip WaveShaper)
+    // 1. Dedicated ASMR Dull Muted Keyboard Bus:
+    // Warm low-mid body boost (205Hz) + gentle muffled lowpass (1080Hz) to strip all tinny clickiness
+    this.asmrKeyBus = ctx.createGain();
+    this.asmrKeyBus.gain.value = 1.0;
+
+    const thockBody = ctx.createBiquadFilter();
+    thockBody.type = 'peaking';
+    thockBody.frequency.value = 205;
+    thockBody.Q.value = 1.1;
+    thockBody.gain.value = 5.2;
+
+    const dullLowpass = ctx.createBiquadFilter();
+    dullLowpass.type = 'lowpass';
+    dullLowpass.frequency.value = 1080;
+    dullLowpass.Q.value = 0.65;
+
+    this.asmrKeyBus.connect(thockBody);
+    thockBody.connect(dullLowpass);
+    dullLowpass.connect(this.masterGain);
+
+    // 2. Authentic 1979 Nostromo Shipboard Intercom Chain (350Hz–3400Hz + soft-clip WaveShaper)
     this.intercomInput = ctx.createGain();
     this.intercomInput.gain.value = 1.0;
 
@@ -264,7 +310,7 @@ export class AudioEngine {
         lp = lp + 0.018 * (white - lp);
         const hum60 = Math.sin(2 * Math.PI * 60 * t) * 0.06;
         const hum120 = Math.sin(2 * Math.PI * 120 * t) * 0.032;
-        const sub42 = Math.sin(2 * Math.PI * 42 * t) * 0.08;
+        const sub42 = Math.sin(2 * Math.PI * 42 * t) * 0.09;
         data[i] = lp * 0.9 + hum60 + hum120 + sub42;
       }
       this.crossfadeLoopSeamless(data, Math.floor(sr * 0.12));
@@ -337,8 +383,9 @@ export class AudioEngine {
     this.rcsGain.connect(this.masterGain);
     this.restartLoopSource('thruster_rcs_loop');
 
+    // Deep omnipresent 1979 Nostromo "Mother" room sub-drone & CRT buzz
     this.cabinHumGain = ctx.createGain();
-    this.cabinHumGain.gain.value = 0.28;
+    this.cabinHumGain.gain.value = 0.34;
     this.cabinHumGain.connect(this.masterGain);
     this.restartLoopSource('ambient_crt_buzz');
 
@@ -446,7 +493,7 @@ export class AudioEngine {
   public setMuted(muted: boolean): void {
     this.muted = muted;
     if (this.ctx && this.masterGain) {
-      this.masterGain.gain.setTargetAtTime(muted ? 0 : 0.88, this.ctx.currentTime, 0.02);
+      this.masterGain.gain.setTargetAtTime(muted ? 0 : 0.9, this.ctx.currentTime, 0.02);
     }
   }
 
@@ -473,17 +520,104 @@ export class AudioEngine {
     return Math.min(1, sum / (this.analyserData.length * 115));
   }
 
+  /**
+   * Plays the full 1979 ALIEN ("Mother" Bridge Awakening Scene - Mn7A1vfs8m0)
+   * initialization audio choreography: heavy relay switch, CRT HV flyback,
+   * ElevenLabs mainframe chirp/relay sequence, tape-drive spin-up, and rhythmic
+   * 1979 FSK analog mainframe bleep cascade.
+   */
+  public playAlienBootAwakening(): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    const now = this.ctx.currentTime;
+
+    this.playSfx('screen_power_on', { volume: 0.92 });
+    this.playSfx('nostromo_boot_sequence', { volume: 0.85, pitch: 0.96 });
+    this.playSfx('tape_drive_servo', { volume: 0.68, pitch: 0.94 });
+
+    // Authentic 1979 Jim Shields-style rhythmic FSK analog mainframe awakening bleeps
+    this.synth1979MainframeCascade(now + 0.18);
+  }
+
+  /**
+   * Plays subtle 1979 Nostromo computer thinking / data-bus telemetry chirps
+   * during terminal transitions, diagnostic lines, and ambient cockpit background.
+   */
+  public playAlienComputerActivity(intensity = 0.55): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    if (Math.random() < 0.65 && this.buffers.has('computer_telemetry_chirp')) {
+      this.playSfx('computer_telemetry_chirp', {
+        volume: intensity,
+        pitch: 0.88 + Math.random() * 0.22,
+        pan: (Math.random() - 0.5) * 0.4,
+      });
+    } else if (this.buffers.has('tape_drive_servo')) {
+      this.playSfx('tape_drive_servo', {
+        volume: intensity * 0.72,
+        pitch: 0.92 + Math.random() * 0.16,
+        pan: (Math.random() - 0.5) * 0.35,
+      });
+    } else {
+      this.synth1979MainframeCascade(this.ctx.currentTime, 4, intensity * 0.5);
+    }
+  }
+
+  /**
+   * Dedicated ASMR dull, muted, cushioned PBT mechanical keyboard clack for scrolling text.
+   * Alternates samples, trims leading silence, pitches down slightly for deep thock,
+   * shapes a clean 115ms envelope, and routes through the 1080Hz dampened ASMR filter bus.
+   */
+  public playAsmrScrollClack(volume = 0.78): void {
+    if (!this.ctx || !this.asmrKeyBus || this.muted) return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastKeyclickTime < 0.036) return;
+    this.lastKeyclickTime = now;
+
+    this.keyAltToggle = !this.keyAltToggle;
+    const chosenId =
+      this.keyAltToggle && this.buffers.has('ui_keyclick_alt')
+        ? 'ui_keyclick_alt'
+        : 'ui_keyclick';
+
+    const buf = this.buffers.get(chosenId);
+    const pitch = 0.76 + Math.random() * 0.18; // Lower pitch = deeper, duller, cushiony thock
+
+    if (buf) {
+      const onset = this.bufferOnsets.get(chosenId) ?? 0;
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.playbackRate.value = pitch;
+
+      const env = this.ctx.createGain();
+      const dur = 0.125;
+      env.gain.setValueAtTime(0.001, now);
+      env.gain.linearRampToValueAtTime(0.95 * volume, now + 0.005);
+      env.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+      const pan = this.ctx.createStereoPanner();
+      pan.pan.value = (Math.random() - 0.5) * 0.18;
+
+      src.connect(env);
+      env.connect(pan);
+      pan.connect(this.asmrKeyBus);
+      src.start(now, onset, dur + 0.03);
+    } else {
+      this.synthAsmrDullThock(now, pitch, volume);
+    }
+  }
+
   public playSfx(id: SfxId, options?: { pitch?: number; pan?: number; volume?: number }): void {
     if (!this.ctx || !this.masterGain || this.muted) return;
     if (this.ctx.state === 'suspended') {
       void this.ctx.resume();
     }
 
+    if (id === 'ui_keyclick' || id === 'ui_keyclick_alt') {
+      this.playAsmrScrollClack(options?.volume ?? 0.82);
+      return;
+    }
+
     const now = this.ctx.currentTime;
-    if (id === 'ui_keyclick') {
-      if (now - this.lastKeyclickTime < 0.032) return;
-      this.lastKeyclickTime = now;
-    } else if (id === 'proximity_klaxon') {
+    if (id === 'proximity_klaxon') {
       if (now - this.lastKlaxonTime < 0.38) return;
       this.lastKlaxonTime = now;
     }
@@ -492,20 +626,20 @@ export class AudioEngine {
     const pan = options?.pan ?? 0;
     const volume = options?.volume ?? 1.0;
 
-    // Resolve real ElevenLabs buffer (ui_toggle_switch maps cleanly to keypress_return)
-    const lookupKey = id === 'ui_toggle_switch' && !this.buffers.has('ui_toggle_switch')
-      ? 'keypress_return'
-      : id;
+    const lookupKey =
+      id === 'ui_toggle_switch' && !this.buffers.has('ui_toggle_switch')
+        ? 'keypress_return'
+        : id;
     const loadedBuf = this.buffers.get(lookupKey);
 
     if (loadedBuf) {
+      const onset = this.bufferOnsets.get(lookupKey) ?? 0;
       const src = this.ctx.createBufferSource();
       src.buffer = loadedBuf;
-      src.playbackRate.value =
-        id === 'ui_keyclick' ? pitch * (0.92 + Math.random() * 0.18) : pitch;
+      src.playbackRate.value = pitch;
 
       const gain = this.ctx.createGain();
-      gain.gain.value = 0.72 * volume;
+      gain.gain.value = 0.74 * volume;
 
       if (pan !== 0) {
         const panner = this.ctx.createStereoPanner();
@@ -516,17 +650,23 @@ export class AudioEngine {
         src.connect(gain);
       }
       gain.connect(this.masterGain);
-      src.start(now);
+      // Start near transient onset for crisp response on snappy mechanical switches
+      const startOffset =
+        lookupKey === 'keypress_return' || lookupKey === 'screen_power_on'
+          ? onset
+          : 0;
+      src.start(now, startOffset);
       return;
     }
 
-    // Procedural Zero-Crash Fallbacks ONLY if buffer failed to load
     switch (id) {
       case 'screen_power_on':
         this.synthScreenPowerOn(now, volume);
         break;
-      case 'ui_keyclick':
-        this.synthKeyclick(now, pitch, volume);
+      case 'nostromo_boot_sequence':
+      case 'computer_telemetry_chirp':
+      case 'tape_drive_servo':
+        this.synth1979MainframeCascade(now, 8, volume * 0.5);
         break;
       case 'keypress_return':
       case 'ui_toggle_switch':
@@ -573,6 +713,88 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Synthesizes muted 1979 ALIEN ("Mother" / Mn7A1vfs8m0) rhythmic analog mainframe
+   * telemetry bleeps routed through the warm band-limited cockpit speaker chain.
+   */
+  private synth1979MainframeCascade(t: number, steps = 14, gainScale = 0.42): void {
+    const ctx = this.ctx!;
+    const dest = this.intercomInput ?? this.masterGain!;
+    // Classic 1979 cassette-futurism pentatonic/quartal telemetry register frequencies
+    const registers = [440, 587.3, 659.2, 784.0, 987.8, 523.2, 880, 392.0];
+
+    let cursor = t;
+    for (let i = 0; i < steps; i++) {
+      const dur = i % 4 === 3 ? 0.085 : 0.042;
+      const gap = i % 5 === 4 ? 0.11 : 0.052;
+      const freq = registers[(i * 3 + Math.floor(i / 2)) % registers.length];
+
+      const osc = ctx.createOscillator();
+      const lp = ctx.createBiquadFilter();
+      const g = ctx.createGain();
+
+      osc.type = i % 3 === 0 ? 'triangle' : 'sine';
+      osc.frequency.setValueAtTime(freq, cursor);
+
+      lp.type = 'lowpass';
+      lp.frequency.value = 1650;
+
+      g.gain.setValueAtTime(0.0001, cursor);
+      g.gain.linearRampToValueAtTime(0.11 * gainScale, cursor + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, cursor + dur);
+
+      osc.connect(lp);
+      lp.connect(g);
+      g.connect(dest);
+
+      osc.start(cursor);
+      osc.stop(cursor + dur + 0.005);
+      cursor += gap;
+    }
+  }
+
+  /**
+   * Warm, dull, muted PBT keycap bottom-out fallback synthesizer (zero bright click).
+   */
+  private synthAsmrDullThock(t: number, pitch: number, volume: number): void {
+    const ctx = this.ctx!;
+    // Low cushioned plastic housing thump (195Hz -> 58Hz)
+    const body = ctx.createOscillator();
+    const bodyGain = ctx.createGain();
+    body.type = 'sine';
+    body.frequency.setValueAtTime(195 * pitch, t);
+    body.frequency.exponentialRampToValueAtTime(56 * pitch, t + 0.038);
+
+    bodyGain.gain.setValueAtTime(0.28 * volume, t);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.046);
+
+    body.connect(bodyGain);
+    bodyGain.connect(this.asmrKeyBus!);
+    body.start(t);
+    body.stop(t + 0.05);
+
+    // Soft muted felt/PBT impact transient (filtered below 750Hz)
+    const sr = ctx.sampleRate;
+    const len = Math.floor(sr * 0.025);
+    const nBuf = ctx.createBuffer(1, len, sr);
+    const d = nBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (sr * 0.006));
+    }
+    const nSrc = ctx.createBufferSource();
+    nSrc.buffer = nBuf;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 720 * pitch;
+    const nGain = ctx.createGain();
+    nGain.gain.value = 0.24 * volume;
+
+    nSrc.connect(lp);
+    lp.connect(nGain);
+    nGain.connect(this.asmrKeyBus!);
+    nSrc.start(t);
+  }
+
   private synthScreenPowerOn(t: number, volume: number): void {
     const ctx = this.ctx!;
     this.synthToggleSwitch(t, 0.85, volume);
@@ -580,9 +802,9 @@ export class AudioEngine {
     const g = ctx.createGain();
     whine.type = 'sine';
     whine.frequency.setValueAtTime(1800, t + 0.05);
-    whine.frequency.exponentialRampToValueAtTime(11800, t + 1.1);
+    whine.frequency.exponentialRampToValueAtTime(9800, t + 1.1);
     g.gain.setValueAtTime(0.0001, t + 0.05);
-    g.gain.exponentialRampToValueAtTime(0.1 * volume, t + 0.2);
+    g.gain.exponentialRampToValueAtTime(0.08 * volume, t + 0.2);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
     whine.connect(g);
     g.connect(this.masterGain!);
@@ -593,20 +815,20 @@ export class AudioEngine {
   private synthIntercomPreChime(t: number): void {
     const ctx = this.ctx!;
     const dest = this.intercomInput!;
-    const freqs = [988, 1318.5];
+    const freqs = [784, 1046.5];
     freqs.forEach((f, idx) => {
       const osc = ctx.createOscillator();
       const g = ctx.createGain();
       osc.type = 'triangle';
       osc.frequency.value = f;
-      const start = t + idx * 0.085;
+      const start = t + idx * 0.09;
       g.gain.setValueAtTime(0.0001, start);
-      g.gain.exponentialRampToValueAtTime(0.15, start + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, start + 0.09);
+      g.gain.exponentialRampToValueAtTime(0.14, start + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + 0.095);
       osc.connect(g);
       g.connect(dest);
       osc.start(start);
-      osc.stop(start + 0.1);
+      osc.stop(start + 0.105);
     });
   }
 
@@ -631,21 +853,6 @@ export class AudioEngine {
     }
   }
 
-  private synthKeyclick(t: number, pitch: number, volume: number): void {
-    const ctx = this.ctx!;
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(2100 * pitch * (0.94 + Math.random() * 0.12), t);
-    osc.frequency.exponentialRampToValueAtTime(480, t + 0.018);
-    g.gain.setValueAtTime(0.16 * volume, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.022);
-    osc.connect(g);
-    g.connect(this.masterGain!);
-    osc.start(t);
-    osc.stop(t + 0.025);
-  }
-
   private synthToggleSwitch(t: number, pitch: number, volume: number): void {
     const ctx = this.ctx!;
     [0, 0.026].forEach((offset, i) => {
@@ -653,18 +860,18 @@ export class AudioEngine {
       const bp = ctx.createBiquadFilter();
       const g = ctx.createGain();
       osc.type = 'triangle';
-      osc.frequency.setValueAtTime((i === 0 ? 1450 : 1950) * pitch, t + offset);
-      osc.frequency.exponentialRampToValueAtTime(320, t + offset + 0.024);
+      osc.frequency.setValueAtTime((i === 0 ? 1150 : 1550) * pitch, t + offset);
+      osc.frequency.exponentialRampToValueAtTime(260, t + offset + 0.026);
       bp.type = 'bandpass';
-      bp.frequency.value = 1600 * pitch;
-      bp.Q.value = 1.8;
+      bp.frequency.value = 1200 * pitch;
+      bp.Q.value = 1.6;
       g.gain.setValueAtTime(0.28 * volume, t + offset);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + offset + 0.028);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + offset + 0.03);
       osc.connect(bp);
       bp.connect(g);
       g.connect(this.masterGain!);
       osc.start(t + offset);
-      osc.stop(t + offset + 0.032);
+      osc.stop(t + offset + 0.034);
     });
   }
 

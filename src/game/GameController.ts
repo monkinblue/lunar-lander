@@ -71,10 +71,13 @@ export class GameController {
     'AWAITING PILOT DROP TELEMETRY DIRECTIVE',
   ];
 
-  // Typewriter & Callout State
+  // Typewriter & 1979 Alien Awakening State
+  private bootPoweredOn = false;
+  private crtWarmupProgress = 0;
   private bootProgressChars = 0;
   private bootVoicePlayed = false;
   private briefingProgressChars = 0;
+  private ambientChirpTimer = 9.5;
   private activeCalloutText: string | null = null;
   private activeCalloutTimer = 0;
   private statusBannerText: string | null = null;
@@ -198,30 +201,34 @@ export class GameController {
     });
   }
 
-  private ensureBootAudioSequence(): void {
-    if (this.bootVoicePlayed) {
+  private awakenMotherIfDormant(): boolean {
+    if (this.bootPoweredOn) {
       void this.audio.unlock();
-      return;
+      return false;
     }
-    this.bootVoicePlayed = true;
+    this.bootPoweredOn = true;
+    this.crtWarmupProgress = 0.04;
+    this.bootProgressChars = 0;
+    this.glitchIntensity = 0.45;
     void this.audio.unlock().then(() => {
-      this.glitchIntensity = Math.max(this.glitchIntensity, 0.35);
-      this.audio.playSfx('screen_power_on', { volume: 0.95 });
-      if (this.phase === 'BOOT' || this.phase === 'TITLE_MENU') {
-        this.triggerVoice('voice_boot', true);
-      }
+      this.audio.playAlienBootAwakening();
     });
+    return true;
   }
 
   private bindInputListeners(): void {
     window.addEventListener('keydown', (e) => {
-      this.ensureBootAudioSequence();
-
       if (
         ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)
       ) {
         e.preventDefault();
       }
+
+      if (this.phase === 'BOOT' && !this.bootPoweredOn) {
+        this.awakenMotherIfDormant();
+        return;
+      }
+      void this.audio.unlock();
 
       this.keysDown.add(e.code);
       this.handleKeyDown(e);
@@ -276,7 +283,11 @@ export class GameController {
 
     window.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
-      this.ensureBootAudioSequence();
+      if (this.phase === 'BOOT' && !this.bootPoweredOn) {
+        this.awakenMotherIfDormant();
+        return;
+      }
+      void this.audio.unlock();
 
       // 1. Hardware Bezel Controls outside curved glass
       const bezelHit = this.bezelUi.hitTest(e.clientX, e.clientY);
@@ -409,6 +420,9 @@ export class GameController {
     switch (id) {
       case 'logs-close':
         this.bezelState.flightLogsOpen = false;
+        break;
+      case 'boot-awaken':
+        this.awakenMotherIfDormant();
         break;
       case 'boot-continue':
         this.advanceFromBoot();
@@ -617,8 +631,17 @@ export class GameController {
     const totalBootChars = BOOT_LINES.reduce((acc, s) => acc + s.length, 0);
     if (this.bootProgressChars < totalBootChars) {
       this.bootProgressChars = totalBootChars;
+      if (!this.bootVoicePlayed) {
+        this.bootVoicePlayed = true;
+        this.triggerVoice('voice_boot', true);
+      }
       return;
     }
+    if (!this.bootVoicePlayed) {
+      this.bootVoicePlayed = true;
+      this.triggerVoice('voice_boot', true);
+    }
+    this.audio.playAlienComputerActivity(0.5);
     this.menuCursor = 0;
     this.phase = 'TITLE_MENU';
   }
@@ -655,6 +678,7 @@ export class GameController {
     this.lastBreakdown = null;
     this.lastFailure = null;
     this.phase = 'SECTOR_BRIEFING';
+    this.audio.playAlienComputerActivity(0.52);
     this.logEvent(`LOADED ${sec.code}: ${sec.name}`);
   }
 
@@ -853,30 +877,53 @@ export class GameController {
     if (this.proximityVoiceCooldown > 0) this.proximityVoiceCooldown = Math.max(0, this.proximityVoiceCooldown - dt);
     if (this.glitchIntensity > 0) this.glitchIntensity = Math.max(0, this.glitchIntensity - dt * 1.45);
 
-    // Typewriter progressions
-    if (this.phase === 'BOOT') {
+    // Typewriter progressions & 1979 Alien computer / ASMR muted clacking
+    if (this.bootPoweredOn && this.crtWarmupProgress < 1) {
+      this.crtWarmupProgress = Math.min(1, this.crtWarmupProgress + dt * 2.2);
+    }
+
+    if (this.bootPoweredOn && this.phase !== 'BOOT') {
+      this.ambientChirpTimer -= dt;
+      if (this.ambientChirpTimer <= 0) {
+        this.ambientChirpTimer = 11 + Math.random() * 6;
+        this.audio.playAlienComputerActivity(0.24);
+      }
+    }
+
+    if (this.phase === 'BOOT' && this.bootPoweredOn && this.crtWarmupProgress > 0.45) {
       const totalBoot = BOOT_LINES.reduce((acc, s) => acc + s.length, 0);
       if (this.bootProgressChars < totalBoot) {
-        const prev = Math.floor(this.bootProgressChars);
-        this.bootProgressChars = Math.min(totalBoot, this.bootProgressChars + dt * 78);
-        if (Math.floor(this.bootProgressChars / 4) > Math.floor(prev / 4)) {
-          this.audio.playSfx('ui_keyclick', { pitch: 1.15, volume: 0.35 });
+        const prev = this.bootProgressChars;
+        this.bootProgressChars = Math.min(totalBoot, this.bootProgressChars + dt * 48);
+        if (Math.floor(this.bootProgressChars / 2.6) > Math.floor(prev / 2.6)) {
+          this.audio.playAsmrScrollClack(0.86);
+        }
+        // Fire subtle 1979 computer register chirp at line boundaries
+        if (Math.floor(this.bootProgressChars / 62) > Math.floor(prev / 62)) {
+          this.audio.playAlienComputerActivity(0.42);
+        }
+        if (this.bootProgressChars >= totalBoot && !this.bootVoicePlayed) {
+          this.bootVoicePlayed = true;
+          this.triggerVoice('voice_boot', true);
         }
       }
     } else if (this.phase === 'SECTOR_BRIEFING') {
       const totalBrief = this.sector.briefingLines.reduce((acc, s) => acc + s.length, 0);
       if (this.briefingProgressChars < totalBrief) {
-        const prev = Math.floor(this.briefingProgressChars);
-        this.briefingProgressChars = Math.min(totalBrief, this.briefingProgressChars + dt * 85);
-        if (Math.floor(this.briefingProgressChars / 5) > Math.floor(prev / 5)) {
-          this.audio.playSfx('ui_keyclick', { pitch: 1.1, volume: 0.3 });
+        const prev = this.briefingProgressChars;
+        this.briefingProgressChars = Math.min(totalBrief, this.briefingProgressChars + dt * 52);
+        if (Math.floor(this.briefingProgressChars / 2.6) > Math.floor(prev / 2.6)) {
+          this.audio.playAsmrScrollClack(0.84);
+        }
+        if (Math.floor(this.briefingProgressChars / 75) > Math.floor(prev / 75)) {
+          this.audio.playAlienComputerActivity(0.36);
         }
       }
     } else if (this.phase === 'SECTOR_TALLY' && this.tallyAnimProgress < 1) {
       const prev = Math.floor(this.tallyAnimProgress * 18);
       this.tallyAnimProgress = Math.min(1, this.tallyAnimProgress + dt * 0.95);
       if (Math.floor(this.tallyAnimProgress * 18) > prev) {
-        this.audio.playSfx('ui_keyclick', { pitch: 1.25, volume: 0.32 });
+        this.audio.playAsmrScrollClack(0.75);
       }
     }
 
@@ -1036,6 +1083,8 @@ export class GameController {
       dropStreak: this.dropStreak,
       selectedStartSector: this.selectedStartSector,
       menuCursor: this.menuCursor,
+      bootPoweredOn: this.bootPoweredOn,
+      crtWarmupProgress: this.crtWarmupProgress,
       bootProgressChars: this.bootProgressChars,
       briefingProgressChars: this.briefingProgressChars,
       tallyAnimProgress: this.tallyAnimProgress,

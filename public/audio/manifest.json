@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "generatedAt": "2026-11-18T03:09:59.602Z",
+  "generatedAt": "2026-11-18T03:51:21.107Z",
   "voiceId": "Xb7hH8MSUJpSbSDYk0k2",
   "assets": {
     "ambient_crt_buzz": {
@@ -28,10 +28,30 @@
       "category": "sfx",
       "bytes": 45182
     },
+    "nostromo_boot_sequence": {
+      "path": "/audio/nostromo_boot_sequence.mp3",
+      "category": "sfx",
+      "bytes": 88650
+    },
+    "computer_telemetry_chirp": {
+      "path": "/audio/computer_telemetry_chirp.mp3",
+      "category": "sfx",
+      "bytes": 36405
+    },
+    "tape_drive_servo": {
+      "path": "/audio/tape_drive_servo.mp3",
+      "category": "sfx",
+      "bytes": 41838
+    },
     "ui_keyclick": {
       "path": "/audio/ui_keyclick.mp3",
       "category": "sfx",
-      "bytes": 15089
+      "bytes": 13835
+    },
+    "ui_keyclick_alt": {
+      "path": "/audio/ui_keyclick_alt.mp3",
+      "category": "sfx",
+      "bytes": 13835
     },
     "keypress_return": {
       "path": "/audio/keypress_return.mp3",

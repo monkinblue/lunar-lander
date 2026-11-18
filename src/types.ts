@@ -223,7 +223,11 @@ export type VoiceCalloutId =
 
 export type SfxId =
   | 'screen_power_on'
+  | 'nostromo_boot_sequence'
+  | 'computer_telemetry_chirp'
+  | 'tape_drive_servo'
   | 'ui_keyclick'
+  | 'ui_keyclick_alt'
   | 'keypress_return'
   | 'ui_toggle_switch'
   | 'lidar_ping'

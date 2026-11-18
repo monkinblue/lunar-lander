@@ -166,7 +166,7 @@ export class WorldRenderer {
           const left = this.worldToScreen(cam, 0, band.minY);
           const right = this.worldToScreen(cam, sector.worldWidth, band.minY);
           if (left.y > 40 && left.y < cam.heightPx - 40) {
-            ctx.strokeStyle = 'rgba(255, 176, 0, 0.28)';
+            ctx.strokeStyle = 'rgba(255, 102, 0, 0.32)';
             ctx.lineWidth = 1.4;
             ctx.setLineDash([8, 10]);
             ctx.beginPath();
@@ -175,7 +175,7 @@ export class WorldRenderer {
             ctx.stroke();
             ctx.setLineDash([]);
 
-            ctx.fillStyle = 'rgba(255, 176, 0, 0.62)';
+            ctx.fillStyle = 'rgba(255, 102, 0, 0.72)';
             const arrow = band.baseVx > 0 ? '>>>' : '<<<';
             ctx.fillText(`SHEAR ${band.minY}M // ${band.label} ${arrow}`, 24, left.y - 6);
           }
@@ -198,7 +198,7 @@ export class WorldRenderer {
       const shimmer = 0.32 + 0.22 * Math.sin(timeSec * 5 + d.pos.x);
       ctx.strokeStyle =
         windMag > 6
-          ? `rgba(255, 176, 0, ${(shimmer * 0.9).toFixed(2)})`
+          ? `rgba(255, 102, 0, ${(shimmer * 0.92).toFixed(2)})`
           : `rgba(68, 255, 119, ${(shimmer * 0.72).toFixed(2)})`;
       ctx.lineWidth = 1.6;
       ctx.beginPath();
@@ -244,7 +244,7 @@ export class WorldRenderer {
         const alpha = Math.sin(prog * Math.PI) * 0.85;
         const wSpan = halfWpx * (0.48 + prog * 0.45);
 
-        ctx.strokeStyle = `rgba(255, 176, 0, ${alpha.toFixed(3)})`;
+        ctx.strokeStyle = `rgba(255, 102, 0, ${alpha.toFixed(3)})`;
         ctx.lineWidth = 2.0;
         ctx.beginPath();
         ctx.moveTo(p.x - wSpan, p.y + 6);
@@ -253,7 +253,7 @@ export class WorldRenderer {
         ctx.stroke();
       }
 
-      ctx.strokeStyle = 'rgba(255, 176, 0, 0.24)';
+      ctx.strokeStyle = 'rgba(255, 102, 0, 0.28)';
       ctx.lineWidth = 1.2;
       ctx.setLineDash([4, 7]);
       ctx.beginPath();
@@ -724,7 +724,7 @@ export class WorldRenderer {
         const cAlpha = Math.sin(phase * Math.PI) * 0.9;
         ctx.strokeStyle = isDepot
           ? `rgba(68, 255, 119, ${cAlpha.toFixed(2)})`
-          : `rgba(255, 176, 0, ${cAlpha.toFixed(2)})`;
+          : `rgba(255, 102, 0, ${cAlpha.toFixed(2)})`;
         ctx.lineWidth = 2.0;
         ctx.beginPath();
         ctx.moveTo(midX - 8, cy - 5);
@@ -815,14 +815,14 @@ export class WorldRenderer {
       } else if (p.kind === 'MAIN') {
         ctx.strokeStyle =
           t > 0.45
-            ? `rgba(255, 176, 0, ${(t * 0.92).toFixed(2)})`
+            ? `rgba(255, 102, 0, ${(t * 0.94).toFixed(2)})`
             : `rgba(68, 255, 119, ${(t * 0.85).toFixed(2)})`;
         ctx.lineWidth = 2.1;
       } else if (p.kind === 'RCS') {
         ctx.strokeStyle = `rgba(172, 255, 198, ${(t * 0.92).toFixed(2)})`;
         ctx.lineWidth = 1.8;
       } else if (p.kind === 'SPARK') {
-        ctx.strokeStyle = `rgba(255, 210, 87, ${t.toFixed(2)})`;
+        ctx.strokeStyle = `rgba(255, 130, 32, ${t.toFixed(2)})`;
         ctx.lineWidth = 2.2;
       } else {
         ctx.strokeStyle = `rgba(68, 255, 119, ${(t * 0.58).toFixed(2)})`;
@@ -1033,7 +1033,7 @@ export class WorldRenderer {
 
       if (fuelRatio > 0.01) {
         ctx.fillStyle =
-          fuelRatio <= 0.25 ? 'rgba(255, 59, 31, 0.78)' : 'rgba(255, 176, 0, 0.72)';
+          fuelRatio <= 0.25 ? 'rgba(255, 51, 24, 0.82)' : 'rgba(255, 102, 0, 0.78)';
         const fillH = tankH * fuelRatio;
         ctx.fillRect(lx(tx) + 1.5, ly(-1.38 + fillH), 0.8 * s - 3, fillH * s);
       }
@@ -1096,7 +1096,7 @@ export class WorldRenderer {
       Math.abs(lander.vel.x) > PHYSICS.SAFE_HS_MAX;
     const col = isFast ? COLORS.AMBER_CAUTION : COLORS.GREEN_PRIMARY;
 
-    ctx.strokeStyle = isFast ? 'rgba(255, 176, 0, 0.42)' : 'rgba(68, 255, 119, 0.38)';
+    ctx.strokeStyle = isFast ? 'rgba(255, 102, 0, 0.48)' : 'rgba(68, 255, 119, 0.38)';
     ctx.lineWidth = 1.4;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();

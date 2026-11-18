@@ -30,6 +30,8 @@ export interface HudRenderContext {
   dropStreak: number;
   selectedStartSector: number;
   menuCursor: number;
+  bootPoweredOn: boolean;
+  crtWarmupProgress: number;
   bootProgressChars: number;
   briefingProgressChars: number;
   tallyAnimProgress: number;
@@ -46,13 +48,13 @@ export interface HudRenderContext {
 }
 
 export const BOOT_LINES = [
-  'MU-TH-UR 6000 // MAINFRAME KERNEL REV 2037.09',
-  'COPYRIGHT (C) WEYLAND-YUTANI CORP // COMMERCIAL TOWING & SURVEY',
-  'CHECKING MEMORY BANKS 0000H-FFFFH .............. NOMINAL',
-  'COUPLING USCSS NOSTROMO ORBITAL TELEMETRY BUS ... LOCKED',
-  'CALIBRATING P39 VECTOR CATHODE DEFLECTION ....... READY',
-  'LOADING LV-426 / THEDUS TOPOGRAPHIC RADAR ....... ONLINE',
-  'INTERFACE 2037 // WEYLAND-YUTANI DESCENT TELEMETRY READY.',
+  'USCSS NOSTROMO // REG. 180924609 // COMMERCIAL TOWING VEHICLE',
+  'MU-TH-UR 6000 MAINFRAME // 2.1 TB CORE AWAKENING SEQUENCE',
+  'MOUNTING MAGNETIC TAPE REELS 01-04 ............. LOCKED',
+  'DECODING ACOUSTIC BEACON // ZETA II RETICULI ... LV-426',
+  'SPECIAL ORDER 937 // PRIORITY ONE: ORBITAL DESCENT SURVEY',
+  'CALIBRATING NARCISSUS DROP-SHUTTLE TELEMETRY ... NOMINAL',
+  'INTERFACE 2037 READY // AWAITING FLIGHT OFFICER DIRECTIVE.',
 ];
 
 export class HudRenderer {
@@ -156,6 +158,18 @@ export class HudRenderer {
     ctx.fillStyle = COLORS.GREEN_PRIMARY;
     const scoreStr = String(Math.round(state.missionScore)).padStart(7, '0');
     ctx.fillText(`SCORE ${scoreStr} // ${Math.max(1, state.dropStreak)}X`, w - pad - 10, pad + 18);
+
+    // Subtle 1979 Nostromo Mainframe Bus Activity Register in bottom-left frame margin
+    if (state.bootPoweredOn) {
+      const regSeed = Math.floor(state.timeSec * 9);
+      const hexA = ((regSeed * 4919) & 0xffff).toString(16).toUpperCase().padStart(4, '0');
+      const hexB = ((regSeed * 7907) & 0xff).toString(16).toUpperCase().padStart(2, '0');
+      const pulseBits = (regSeed % 2 === 0) ? '[||||..||]' : '[||.||||.]';
+      ctx.textAlign = 'left';
+      ctx.font = '10px "JetBrains Mono", monospace';
+      ctx.fillStyle = COLORS.GREEN_DIM;
+      ctx.fillText(`MU-TH-UR 6000 // BUS ${hexA}:${hexB} ${pulseBits} // ORD-937`, pad + 10, h - pad - 6);
+    }
     ctx.restore();
   }
 
@@ -871,7 +885,7 @@ export class HudRenderer {
 
     const padLeftPx = alignX + alignW * (0.5 - padHalfW / (viewHalfM * 2));
     const padRightPx = alignX + alignW * (0.5 + padHalfW / (viewHalfM * 2));
-    ctx.fillStyle = 'rgba(255, 176, 0, 0.28)';
+    ctx.fillStyle = 'rgba(255, 102, 0, 0.30)';
     ctx.fillRect(padLeftPx, alignY + 12, padRightPx - padLeftPx, 6);
     ctx.strokeStyle = COLORS.AMBER_CAUTION;
     ctx.lineWidth = 2.0;
@@ -1037,48 +1051,166 @@ export class HudRenderer {
   ): void {
     ctx.save();
     ctx.fillStyle = COLORS.BG_DEEP;
-    ctx.fillRect(20, 42, w - 40, h - 62);
+    ctx.fillRect(16, 40, w - 32, h - 56);
 
-    const boxW = Math.min(680, w - 80);
-    const boxH = Math.min(360, h - 120);
-    const bx = (w - boxW) * 0.5;
-    const by = (h - boxH) * 0.5;
+    // Stage 0: Dormant Nostromo Bridge CRT Standby Gate (unlocks AudioContext on first click/key
+    // so the 1979 ALIEN awakening & ASMR muted text clacking play from the very first character!)
+    if (!state.bootPoweredOn) {
+      const cy = h * 0.5;
+      const pulse = 0.55 + 0.45 * Math.sin(state.timeSec * 3.2);
 
-    this.drawCornerBrackets(ctx, bx, by, boxW, boxH, 18, COLORS.GREEN_PRIMARY, 2.4);
+      // Glowing dormant horizontal cathode filament line
+      ctx.strokeStyle = `rgba(255, 102, 0, ${(0.25 + pulse * 0.35).toFixed(2)})`;
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.18, cy - 42);
+      ctx.lineTo(w * 0.82, cy - 42);
+      ctx.stroke();
 
-    ctx.font = 'bold 17px "Share Tech Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 13px "Share Tech Mono", monospace';
+      ctx.fillStyle = COLORS.GREEN_MID;
+      ctx.fillText(
+        'WEYLAND-YUTANI CORP // USCSS NOSTROMO BRIDGE TERMINAL 2037',
+        w * 0.5,
+        cy - 64
+      );
+
+      this.addButton(
+        ctx,
+        'boot-awaken',
+        w * 0.5 - 210,
+        cy - 18,
+        420,
+        44,
+        '[ CLICK OR PRESS SPACE ] AWAKEN MU-TH-UR 6000',
+        true,
+        state.hoveredButtonId,
+        COLORS.AMBER_CAUTION
+      );
+
+      ctx.font = '11px "JetBrains Mono", monospace';
+      ctx.fillStyle = COLORS.GREEN_DIM;
+      ctx.fillText('STANDBY RELAY BUS ARMED // ACOUSTIC TELEMETRY READY', w * 0.5, cy + 50);
+      ctx.restore();
+      return;
+    }
+
+    // CRT Vertical Deflection Beam Expand Animation on Power-On
+    if (state.crtWarmupProgress < 1) {
+      const p = state.crtWarmupProgress;
+      const openH = Math.max(3, (h - 80) * (p * p));
+      ctx.beginPath();
+      ctx.rect(16, h * 0.5 - openH * 0.5, w - 32, openH);
+      ctx.clip();
+
+      if (p < 0.45) {
+        ctx.fillStyle = 'rgba(255, 140, 36, 0.35)';
+        ctx.fillRect(30, h * 0.5 - 3, w - 60, 6);
+      }
+    }
+
+    const totalW = Math.min(790, w - 64);
+    const boxH = Math.min(395, h - 105);
+    const bx = (w - totalW) * 0.5;
+    const by = (h - boxH) * 0.5 + 4;
+
+    const mainW = Math.floor(totalW * 0.72);
+    const auxX = bx + mainW + 14;
+    const auxW = totalW - mainW - 14;
+
+    // Left Main MU-TH-UR 6000 Terminal Window
+    this.drawCornerBrackets(ctx, bx, by, mainW, boxH, 18, COLORS.GREEN_PRIMARY, 2.4);
+
+    ctx.font = 'bold 16.5px "Share Tech Mono", monospace';
     ctx.fillStyle = COLORS.AMBER_CAUTION;
     ctx.textAlign = 'left';
-    ctx.fillText('INTERFACE 2037 // MU-TH-UR 6000 BOOT SEQUENCE', bx + 24, by + 36);
+    ctx.fillText('INTERFACE 2037 // MU-TH-UR 6000 AWAKENING', bx + 20, by + 32);
 
-    ctx.font = 'bold 13px "JetBrains Mono", monospace';
-    ctx.fillStyle = COLORS.GREEN_PRIMARY;
+    ctx.strokeStyle = COLORS.AMBER_DIM;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(bx + 20, by + 42);
+    ctx.lineTo(bx + mainW - 20, by + 42);
+    ctx.stroke();
 
-    let remaining = state.bootProgressChars;
+    ctx.font = 'bold 12px "JetBrains Mono", monospace';
+    let remaining = Math.floor(state.bootProgressChars);
     let cursorDrawn = false;
     BOOT_LINES.forEach((line, idx) => {
-      const ly = by + 76 + idx * 28;
+      const ly = by + 72 + idx * 32;
       if (remaining <= 0) return;
       const slice = line.slice(0, remaining);
       remaining -= line.length;
-      ctx.fillText(slice, bx + 24, ly);
+      ctx.fillStyle = idx === 4 ? COLORS.AMBER_CAUTION : COLORS.GREEN_PRIMARY;
+      ctx.fillText(slice, bx + 20, ly);
       if (remaining <= 0 && !cursorDrawn) {
         cursorDrawn = true;
         if (Math.sin(state.timeSec * 12) > 0) {
           const cw = ctx.measureText(slice).width;
-          ctx.fillRect(bx + 26 + cw, ly - 11, 9, 14);
+          ctx.fillStyle = COLORS.AMBER_BRIGHT;
+          ctx.fillRect(bx + 23 + cw, ly - 11, 9, 14);
         }
       }
     });
 
+    // Right Auxiliary 1979 Nostromo Hex Register & Subsystem Status Matrix (Mn7A1vfs8m0 vibe!)
+    this.drawCornerBrackets(ctx, auxX, by, auxW, boxH, 14, COLORS.AMBER_CAUTION, 2.0);
+    ctx.font = 'bold 11px "Share Tech Mono", monospace';
+    ctx.fillStyle = COLORS.AMBER_CAUTION;
+    ctx.fillText('CORE REGISTERS', auxX + 12, by + 26);
+
+    ctx.font = '10px "JetBrains Mono", monospace';
+    const stepTick = Math.floor(state.timeSec * 11);
+    for (let r = 0; r < 8; r++) {
+      const activeRow = state.bootProgressChars > r * 35;
+      ctx.fillStyle = activeRow ? COLORS.GREEN_MID : COLORS.GREEN_DIM;
+      const addr = ((0x2030 + r * 16)).toString(16).toUpperCase();
+      const v1 = activeRow ? (((stepTick + r * 73) * 269) & 0xff).toString(16).toUpperCase().padStart(2, '0') : '00';
+      const v2 = activeRow ? (((stepTick + r * 31) * 613) & 0xff).toString(16).toUpperCase().padStart(2, '0') : '00';
+      const v3 = activeRow ? (((stepTick + r * 19) * 977) & 0xff).toString(16).toUpperCase().padStart(2, '0') : '00';
+      ctx.fillText(`${addr}: ${v1} ${v2} ${v3}`, auxX + 12, by + 50 + r * 17);
+    }
+
+    // Illuminated Orange & Green Nostromo Bridge Relay Blocks
+    const sysLabels = ['LIFE SUPP', 'CRYO BAY', 'NAV RADAR', 'DROP POD'];
+    sysLabels.forEach((lbl, sIdx) => {
+      const lit = state.bootProgressChars > (sIdx + 1) * 68;
+      const sy = by + 202 + sIdx * 32;
+      ctx.fillStyle = lit
+        ? sIdx === 3
+          ? 'rgba(255, 102, 0, 0.25)'
+          : 'rgba(68, 255, 119, 0.18)'
+        : 'rgba(13, 59, 30, 0.15)';
+      ctx.fillRect(auxX + 12, sy, auxW - 24, 23);
+      ctx.strokeStyle = lit
+        ? sIdx === 3
+          ? COLORS.AMBER_CAUTION
+          : COLORS.GREEN_PRIMARY
+        : COLORS.GREEN_DIM;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(auxX + 12, sy, auxW - 24, 23);
+
+      ctx.font = 'bold 10px "Share Tech Mono", monospace';
+      ctx.fillStyle = lit
+        ? sIdx === 3
+          ? COLORS.AMBER_BRIGHT
+          : COLORS.GREEN_BRIGHT
+        : COLORS.GREEN_DIM;
+      ctx.textAlign = 'center';
+      ctx.fillText(lit ? `${lbl}: ON` : `${lbl}: --`, auxX + auxW * 0.5, sy + 15);
+    });
+
+    const totalBootChars = BOOT_LINES.reduce((a, b) => a + b.length, 0);
+    const done = state.bootProgressChars >= totalBootChars;
     this.addButton(
       ctx,
       'boot-continue',
-      w * 0.5 - 170,
-      by + boxH - 52,
-      340,
-      36,
-      '[SPACE / CLICK] POWER ON COMMAND BUS',
+      bx + mainW * 0.5 - 165,
+      by + boxH - 48,
+      330,
+      34,
+      done ? '[SPACE / CLICK] ENTER COMMAND TERMINAL' : '[SPACE / CLICK] BYPASS DIAGNOSTICS',
       true,
       state.hoveredButtonId,
       COLORS.AMBER_CAUTION

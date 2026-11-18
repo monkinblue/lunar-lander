@@ -154,13 +154,15 @@ void main() {
   vec3 accumC = texture2D(uAccumTex, sampleUv).rgb * 0.65 +
                 texture2D(uAccumTex, clamp(sampleUv - vec2(2.4 * texel.x, 0.0), 0.001, 0.999)).rgb * 0.35;
   vec3 ghostTail = max(accumC - liveC, vec3(0.0));
-  // Tint decaying persistence slightly toward warm P39 afterglow
-  vec3 trailTint = vec3(1.05, 1.08, 0.65);
+  float tailWarmth = smoothstep(0.04, 0.32, ghostTail.r - ghostTail.g * 0.65);
+  vec3 trailTint = mix(vec3(0.90, 1.08, 0.78), vec3(1.16, 0.68, 0.32), tailWarmth);
   vec3 beamWithPersistence = liveC + ghostTail * trailTint * (0.48 + 0.34 * dial);
 
   // Incandescent Electron-Beam Hot Core + Multi-Ring Glass Halation / Bloom
   float corePeak = max(liveC.r, max(liveC.g, liveC.b));
-  vec3 hotCore = pow(max(liveC - vec3(0.32), vec3(0.0)), vec3(1.35)) * 0.72;
+  float liveWarmth = smoothstep(0.04, 0.32, liveC.r - liveC.g * 0.65);
+  vec3 hotCore = pow(max(liveC - vec3(0.32), vec3(0.0)), vec3(1.35)) *
+                 mix(vec3(0.65, 0.75, 0.65), vec3(0.85, 0.44, 0.18), liveWarmth);
 
   vec3 innerHalation = vec3(0.0);
   vec3 wideHalation = vec3(0.0);
@@ -187,10 +189,12 @@ void main() {
 
   vec3 bloomCol = max(innerHalation - vec3(0.02), vec3(0.0)) * (0.48 + 0.58 * dial) +
                   max(wideHalation - vec3(0.025), vec3(0.0)) * (0.32 + 0.48 * dial);
+  float bloomWarmth = smoothstep(0.03, 0.25, bloomCol.r - bloomCol.g * 0.65);
+  vec3 bloomTint = mix(vec3(0.86, 1.08, 0.86), vec3(1.18, 0.68, 0.36), bloomWarmth);
 
   // Subtle ambient green-smoked CRT phosphor faceplate tint (like the 1979 reference photo)
   vec3 faceplateBase = vec3(0.012, 0.038, 0.020) * (1.0 - cornerR2 * 0.42);
-  vec3 col = faceplateBase + beamWithPersistence + hotCore + bloomCol * vec3(0.95, 1.10, 0.88);
+  vec3 col = faceplateBase + beamWithPersistence + hotCore + bloomCol * bloomTint;
 
   // Dense Curved CRT Scanlines + Shadow-Mask Aperture Texture
   float curvedLineCoord = uv.y * uResolution.y * 0.52;
